@@ -8,18 +8,18 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
-
-	"github.com/anthropics/anthropic-sdk-go/option"
+	"time"
 
 	"github.com/navingamage/glean/internal/model"
 )
 
-// stub answers the Messages API with a canned structured output, and hands the
-// request it received back to the test.
+// stub answers the chat completions endpoint with a canned structured output,
+// and hands the request it received back to the test.
 //
 // This exercises everything glean owns on both sides of the model: that the
-// schema is sent, that the returned JSON decodes into the fields the matcher
+// strict schema is sent, that the response decodes into the fields the matcher
 // reads, and that entity names and provinces are normalized on the way in. What
 // it cannot test is the model's judgment about a class definition, which is the
 // one part that has to be checked against real notices by hand.
@@ -30,24 +30,24 @@ func stub(t *testing.T, payload any) (*Client, *map[string]any) {
 		body, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(body, &captured)
 
-		text, err := json.Marshal(payload)
+		content, err := json.Marshal(payload)
 		if err != nil {
 			t.Fatal(err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"id":"msg_1","type":"message","role":"assistant",
-			"model":"claude-opus-5","stop_reason":"end_turn",
-			"content":[{"type":"text","text":%s}],
-			"usage":{"input_tokens":10,"output_tokens":10}}`, mustJSONString(string(text)))
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":%s},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":1200,"completion_tokens":400,"cost":0.0009}}`,
+			mustJSONString(string(content)))
 	}))
 	t.Cleanup(srv.Close)
+	return testClient(srv.URL), &captured
+}
 
-	c := newClient("claude-opus-5",
-		option.WithAPIKey("test"),
-		option.WithBaseURL(srv.URL),
-		option.WithMaxRetries(0),
-	)
-	return c, &captured
+func testClient(base string) *Client {
+	return &Client{
+		Key: "test", Model: "google/gemini-3.7-flash", BaseURL: base,
+		HTTP: &http.Client{Timeout: 10 * time.Second}, MaxTokens: 8000, Usage: &Usage{},
+	}
 }
 
 func mustJSONString(s string) string {
@@ -86,7 +86,7 @@ func breadPayload() map[string]any {
 	}
 }
 
-func TestExtractDecodesAndNormalizes(t *testing.T) {
+func TestExtractSendsAStrictSchemaAndNormalizesTheResult(t *testing.T) {
 	c, req := stub(t, breadPayload())
 	s, err := c.Extract(context.Background(), "https://cfmlawyers.ca/class-action/bread",
 		"Bread", "a long notice about packaged bread")
@@ -94,13 +94,27 @@ func TestExtractDecodesAndNormalizes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The schema has to reach the API, or the model is free to return prose.
-	oc, ok := (*req)["output_config"].(map[string]any)
+	// Without a strict schema the model is free to return prose, and every field
+	// below becomes a parsing problem instead of a value.
+	rf, ok := (*req)["response_format"].(map[string]any)
 	if !ok {
-		t.Fatal("request carried no output_config")
+		t.Fatal("request carried no response_format")
 	}
-	if _, ok := oc["format"].(map[string]any)["schema"]; !ok {
-		t.Error("request carried no JSON schema")
+	if rf["type"] != "json_schema" {
+		t.Errorf("response_format type = %v", rf["type"])
+	}
+	js, ok := rf["json_schema"].(map[string]any)
+	if !ok {
+		t.Fatal("response_format carried no json_schema")
+	}
+	if js["strict"] != true {
+		t.Error("schema was not marked strict")
+	}
+	if _, ok := js["schema"].(map[string]any); !ok {
+		t.Error("request carried no schema body")
+	}
+	if got := (*req)["temperature"]; got != 0.0 {
+		t.Errorf("temperature = %v, want 0: a class definition that varies between runs shows up as a spurious nightly change", got)
 	}
 
 	if s.ID != model.NewID("https://cfmlawyers.ca/class-action/bread") {
@@ -134,6 +148,11 @@ func TestExtractDecodesAndNormalizes(t *testing.T) {
 	if s.Criteria[2].Kind != model.KindOther {
 		t.Errorf("unknown kind became %q, want other", s.Criteria[2].Kind)
 	}
+
+	// Spend has to be visible or nobody keeps the scan running.
+	if c.Usage.Calls != 1 || c.Usage.Cost != 0.0009 {
+		t.Errorf("usage = %+v", c.Usage)
+	}
 }
 
 func TestExtractRejectsANonClassActionPage(t *testing.T) {
@@ -164,8 +183,67 @@ func TestExtractRefusesAFabricatedClaimURL(t *testing.T) {
 	}
 }
 
+func TestRateLimitIsWaitedOutAndBadRequestsAreNot(t *testing.T) {
+	// A scan touches a few dozen pages in a burst, so a 429 is expected rather
+	// than exceptional. A 400 is a bug in the request, and retrying it just
+	// spends money more slowly.
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			fmt.Fprint(w, `{"error":{"message":"slow down"}}`)
+			return
+		}
+		content, _ := json.Marshal(breadPayload())
+		fmt.Fprintf(w, `{"choices":[{"message":{"content":%s},"finish_reason":"stop"}],"usage":{}}`,
+			mustJSONString(string(content)))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if _, err := testClient(srv.URL).Extract(ctx, "https://firm.ca/x", "x", "y"); err != nil {
+		t.Fatalf("a 429 should have been waited out: %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Errorf("made %d calls, want 2", got)
+	}
+
+	var bad atomic.Int32
+	badSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bad.Add(1)
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":{"message":"model does not support response_format"}}`)
+	}))
+	defer badSrv.Close()
+
+	_, err := testClient(badSrv.URL).Extract(context.Background(), "https://firm.ca/x", "x", "y")
+	if err == nil {
+		t.Fatal("a 400 should be reported, not swallowed")
+	}
+	if bad.Load() != 1 {
+		t.Errorf("retried a 400 %d times", bad.Load())
+	}
+}
+
+func TestUpstreamErrorInsideA200IsRetriedThenReported(t *testing.T) {
+	// OpenRouter reports some upstream provider failures in the body of a 200.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"error":{"message":"upstream provider is down","code":502}}`)
+	}))
+	defer srv.Close()
+	c := testClient(srv.URL)
+	c.HTTP.Timeout = 5 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
+	defer cancel()
+	_, err := c.Extract(ctx, "https://firm.ca/x", "x", "y")
+	if err == nil {
+		t.Fatal("an error body inside a 200 must not read as success")
+	}
+}
+
 func TestNewClientWithoutAKeyIsARecoverableCondition(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
 	if _, err := NewClient("", ""); !errors.Is(err, ErrNoKey) {
 		t.Fatalf("err = %v, want ErrNoKey", err)
 	}

@@ -39,6 +39,7 @@ Commands:
   claim <id> <new|interested|filed|paid|rejected|skipped>
                 Record what you have done about a settlement
   sources       List configured sources; "sources check" probes each one
+  models        List OpenRouter models by what a scan would cost
   serve         Run the web dashboard
   digest        Re-render the current digest without scanning
 
@@ -57,7 +58,7 @@ func main() {
 	var g globalFlags
 	flag.StringVar(&g.dir, "dir", "", "state directory (default $GLEAN_HOME or ~/.local/share/glean)")
 	flag.StringVar(&g.registry, "sources", "", "path to a sources.json replacing the built-in registry")
-	flag.StringVar(&g.model, "model", extract.DefaultModel, "extraction model")
+	flag.StringVar(&g.model, "model", envOr("GLEAN_MODEL", extract.DefaultModel), "extraction model, as an OpenRouter id")
 	flag.BoolVar(&g.noLLM, "no-llm", false, "extract with regular expressions only, never call a model")
 	flag.BoolVar(&g.verbose, "v", false, "log each page as it is visited")
 	flag.Usage = func() {
@@ -84,9 +85,12 @@ func main() {
 func run(ctx context.Context, g globalFlags, args []string) error {
 	cmd, rest := args[0], args[1:]
 
-	// sources check needs no state directory and no profile.
-	if cmd == "sources" {
+	// Neither of these needs a state directory or a profile.
+	switch cmd {
+	case "sources":
 		return cmdSources(ctx, g, rest)
+	case "models":
+		return cmdModels(ctx, g, rest)
 	}
 
 	st, err := store.Open(g.dir)
@@ -132,9 +136,16 @@ func extractor(g globalFlags) (*extract.Client, string) {
 	}
 	ex, err := extract.NewClient("", g.model)
 	if err != nil {
-		return nil, "extraction: regular expressions only (no ANTHROPIC_API_KEY; class definitions will not be read)"
+		return nil, "extraction: regular expressions only (no OPENROUTER_API_KEY; class definitions will not be read)"
 	}
 	return ex, "extraction: " + ex.Model
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 func flagSet(name string) *flag.FlagSet {

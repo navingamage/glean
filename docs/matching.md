@@ -111,7 +111,7 @@ class" would be the single most damaging thing this program could say, so it is
 special-cased: no criteria gives `unknown`, a note explaining that the definition
 could not be read, and a low prior. Most classes are narrower than "anyone".
 
-This is the normal state of every settlement when there is no API key.
+This is the normal state of every settlement when there is no OPENROUTER_API_KEY.
 
 ## Ranking
 

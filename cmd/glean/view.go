@@ -171,7 +171,7 @@ func cmdAsk(g globalFlags, st *store.Store, args []string) error {
 			fmt.Println("Nothing tracked yet. Run `glean scan` first.")
 		case unread == len(as):
 			fmt.Printf("No questions to ask, because no class definition was read on any of the %d tracked settlements.\n", len(as))
-			fmt.Println("Reading a class definition needs the extraction model. Set ANTHROPIC_API_KEY and scan again.")
+			fmt.Println("Reading a class definition needs the extraction model. Set OPENROUTER_API_KEY and scan again.")
 		default:
 			fmt.Println("Nothing to ask. Every tracked settlement is resolved against your profile.")
 		}

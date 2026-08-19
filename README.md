@@ -3,9 +3,9 @@
 Finds Canadian class action settlements you can claim from, works out whether
 you are in the class, and tells you before the deadline passes.
 
-Written in Go. One dependency, the Anthropic SDK, and only for reading class
-definitions; everything else is the standard library, including the HTML parser
-and the robots.txt parser.
+Written in Go with no dependencies at all: the HTML parser, the robots.txt
+parser and the OpenRouter client are all in this repository, on top of the
+standard library.
 
 ```
 $ glean scan
@@ -55,13 +55,24 @@ stages, their deadlines and their claim portals. What it will not do is read a
 class definition, because a class definition is prose and no regular expression
 is going to parse it.
 
-For that, set a key and scan again:
+For that it needs a model. glean talks to [OpenRouter](https://openrouter.ai),
+so any model on it that supports strict JSON schema will do:
 
 ```bash
-export ANTHROPIC_API_KEY=...
+export OPENROUTER_API_KEY=...
+./bin/glean models          # live price list, sorted by what a scan costs
 ./bin/glean scan
 ./bin/glean ask
 ```
+
+`glean models` prices every usable model against a real workload rather than
+against a token count nobody can picture: what one settlement notice costs to
+read, and what a full scan of the registry costs. The answer is cents, on every
+model in the list, which is the useful thing to know. Pick on whether a model
+gets the conjunctions in a class definition right, not on the price per token.
+
+The default is `google/gemini-3.7-flash`. Override it per run with `-model`, or
+once with `GLEAN_MODEL`.
 
 `ask` is where the profile fills in. It puts the highest-value unanswered
 question first, records the answer once, and never asks it again.
@@ -121,7 +132,7 @@ have changed since yesterday.
 | `source/` | The registry is data, not code: a start URL and a rough idea of what a case URL looks like. Every site in it will be redesigned, and a scraper pinned to CSS selectors breaks silently the day that happens, which is the failure mode that costs money. A redesign here costs recall, not correctness. |
 | `fetch/` | One request per second per host, robots.txt honoured as a hard gate, and conditional GET so an unchanged page costs a 304 and no bytes. |
 | `htmlx/` | A linear tokenizer rather than a tree. Everything glean wants from a page is either the anchors or the visible prose, and malformed markup degrades into slightly worse text instead of an error. |
-| `extract/` | A relevance score decides whether a page is a notice at all, which is what keeps the model from being handed several hundred partner biographies a day. Regular expressions read dates and amounts; the model reads the class definition. |
+| `extract/` | A relevance score decides whether a page is a notice at all, which is what keeps the model from being handed several hundred partner biographies a day. Regular expressions read dates and amounts; the model reads the class definition. Every scan prints what it spent. |
 | `store/` | An append-only event log with state derived by replaying it. The most important thing this program can tell you is that a deadline moved, and a store that overwrites cannot tell you that. |
 | `match/` | The three-valued evaluation above. |
 | `notify/` | Thirty, fourteen, seven, three and one day out. The thirty-day one is the one that matters, because a claim needing a document you have to find is not something to learn about on the last morning. |
@@ -138,6 +149,9 @@ So when a case page leaves the deadline unanswered, glean scores the outbound
 links, follows the one that looks like the official portal, and backfills from
 it. One hop, off-site only, and only when something is still missing. In a scan
 of the current registry this is the difference between one deadline and nine.
+
+See [docs/models.md](docs/models.md) for how the model is chosen and what it
+costs.
 
 ## Sources
 
