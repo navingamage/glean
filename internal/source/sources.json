@@ -1,0 +1,297 @@
+[
+  {
+    "id": "canooq",
+    "name": "Canooq class action tracker",
+    "kind": "aggregator",
+    "jurisdiction": [
+      "CA"
+    ],
+    "listing": [
+      "https://www.canooq.ca/class-actions"
+    ],
+    "follow": [
+      "^https://canooq\\.ca/class-actions/[^/]+$"
+    ],
+    "notes": "Consumer-facing tracker, and the single densest listing of live Canadian consumer claims. Also links out to firm and administrator pages, which is how several other sources here were found."
+  },
+  {
+    "id": "actis-law",
+    "name": "Actis Class Action Law Group",
+    "kind": "firm",
+    "jurisdiction": [
+      "CA"
+    ],
+    "listing": [
+      "https://actislaw.org/class-actions"
+    ],
+    "follow": [
+      "^https://actislaw\\.org/class-actions/[^/]+$"
+    ],
+    "exclude": [
+      "start-a-class-action"
+    ],
+    "notes": "Consumer and mislabelling cases: Amazon Prime, DoorDash fees, Starbucks sourcing. The kind of thing nobody goes looking for."
+  },
+  {
+    "id": "sotos",
+    "name": "Sotos Class Actions",
+    "kind": "firm",
+    "jurisdiction": [
+      "CA"
+    ],
+    "listing": [
+      "https://sotosclassactions.com/",
+      "https://sotosclassactions.com/current-cases"
+    ],
+    "follow": [
+      "^https://sotosclassactions\\.com/current-cases\\?cid=[0-9]+$"
+    ],
+    "notes": "Cases are addressed by query string rather than by path, which is why the canonicalizer keeps query strings."
+  },
+  {
+    "id": "charney",
+    "name": "Charney Lawyers",
+    "kind": "firm",
+    "jurisdiction": [
+      "ON"
+    ],
+    "listing": [
+      "https://charneylawyers.com/class-action/current-class-actions",
+      "https://charneylawyers.com/class-action/settled-class-actions"
+    ],
+    "follow": [
+      "^https://charneylawyers\\.com/[^/]*(class-action|action-collective)[^/]*(/home)?$"
+    ],
+    "exclude": [
+      "charneylawyers\\.com/class-action/",
+      "/class-actions?$"
+    ],
+    "notes": "Facebook data misuse, Ticketmaster, Cadillac Fairview, Ashley Madison. Consumer privacy is their line."
+  },
+  {
+    "id": "consumer-law-group",
+    "name": "Consumer Law Group",
+    "kind": "firm",
+    "jurisdiction": [
+      "QC",
+      "CA"
+    ],
+    "listing": [
+      "https://clg.org/en/class-actions/",
+      "https://clg.org/Class-Action/List-of-Class-Actions",
+      "https://clg.org/Class-Action/Other-Cases"
+    ],
+    "follow": [
+      "^https://clg\\.org/Class-Action/(Other-Cases|Current-Cases)/[^/]+$"
+    ]
+  },
+  {
+    "id": "cfm-lawyers",
+    "name": "CFM Lawyers",
+    "kind": "firm",
+    "jurisdiction": [
+      "BC"
+    ],
+    "listing": [
+      "https://www.cfmlawyers.ca/class-action/",
+      "https://www.cfmlawyers.ca/"
+    ],
+    "follow": [
+      "^https://cfmlawyers\\.ca/(class-action|development)/[^/]+$"
+    ]
+  },
+  {
+    "id": "phillips-barristers",
+    "name": "Phillips Barristers (formerly Waddell Phillips)",
+    "kind": "firm",
+    "jurisdiction": [
+      "ON"
+    ],
+    "listing": [
+      "https://waddellphillips.ca/",
+      "https://phillipsbarristers.ca/class-actions"
+    ],
+    "follow": [
+      "^https://phillipsbarristers\\.ca/class-actions/[^/]+$"
+    ],
+    "notes": "waddellphillips.ca still resolves and redirects here, so both are listed."
+  },
+  {
+    "id": "merchant-law",
+    "name": "Merchant Law Group",
+    "kind": "firm",
+    "jurisdiction": [
+      "CA"
+    ],
+    "listing": [
+      "https://www.merchantlaw.com/class-actions"
+    ],
+    "follow": [
+      "^https://merchantlaw\\.com/class-actions-recours-collectif-canada/[^/]+$",
+      "^https://merchantlaw\\.com/class-actions/current-class-actions/[^/]+$"
+    ]
+  },
+  {
+    "id": "rochon-genova",
+    "name": "Rochon Genova LLP",
+    "kind": "firm",
+    "jurisdiction": [
+      "ON"
+    ],
+    "listing": [
+      "https://www.rochongenova.com/Class-Actions/"
+    ],
+    "follow": [
+      "^https://rochongenova\\.com/class-actions/[^/]+$"
+    ]
+  },
+  {
+    "id": "siskinds",
+    "name": "Siskinds LLP",
+    "kind": "firm",
+    "jurisdiction": [
+      "CA"
+    ],
+    "listing": [
+      "https://www.siskinds.com/class-actions/"
+    ],
+    "follow": [
+      "^https://siskinds\\.com/class-actions/[^/]+$"
+    ],
+    "exclude": [
+      "/page/[0-9]+",
+      "previous-actions",
+      "ediscovery"
+    ],
+    "disabled": true,
+    "notes": "DISABLED: the listing page fetches, but every case page under it answers 403 to a non-browser client. Left in the registry with its patterns intact so a re-check picks it up if that changes."
+  },
+  {
+    "id": "mnp-settlements",
+    "name": "MNP class action claims administration",
+    "kind": "administrator",
+    "jurisdiction": [
+      "CA"
+    ],
+    "listing": [
+      "https://mnp.ca/en/services/corporate-and-consumer-insolvency/class-action"
+    ],
+    "follow": [
+      "^https://mnp\\.ca/en/services/corporate-and-consumer-insolvency/class-action/[^/]+$",
+      "^https://settlements\\.mnp\\.ca/en/ClassAction/[^/]+$"
+    ],
+    "notes": "Administrators run the claim portals, so a deadline here is the one that will actually be enforced. Weighted highest by source authority."
+  },
+  {
+    "id": "topclassactions-ca",
+    "name": "Top Class Actions Canada",
+    "kind": "aggregator",
+    "jurisdiction": [
+      "CA"
+    ],
+    "listing": [
+      "https://ca.topclassactions.com/category/lawsuit-settlements/open-lawsuit-settlements/"
+    ],
+    "follow": [
+      "^https://ca\\.topclassactions\\.com/lawsuit-settlements/[^/]+/[^/]+/?$"
+    ],
+    "disabled": true,
+    "notes": "DISABLED: refuses Go's TLS client hello with 403 regardless of headers, while curl to the same URL succeeds. That is bot management fingerprinting the TLS handshake, and getting past it would mean forging a browser fingerprint, which is a line this program does not cross. Content-wise it is the best consumer source in the country, so re-check it occasionally."
+  },
+  {
+    "id": "koskie-minsky",
+    "name": "Koskie Minsky",
+    "kind": "firm",
+    "jurisdiction": [
+      "CA"
+    ],
+    "listing": [
+      "https://kmlaw.ca/cases/"
+    ],
+    "follow": [
+      "^https://kmlaw\\.ca/cases/[^/]+/?$"
+    ],
+    "disabled": true,
+    "notes": "DISABLED: 403 to every client tried, including curl with a browser agent."
+  },
+  {
+    "id": "strosberg",
+    "name": "Strosberg Wingfield Sasso",
+    "kind": "firm",
+    "jurisdiction": [
+      "ON"
+    ],
+    "listing": [
+      "https://strosbergco.com/class-actions/"
+    ],
+    "follow": [
+      "^https://strosbergco\\.com/class-actions/[^/]+/?$"
+    ],
+    "disabled": true,
+    "notes": "DISABLED: TLS-level bot management, same as Top Class Actions."
+  },
+  {
+    "id": "ricepoint",
+    "name": "RicePoint settlement administration",
+    "kind": "administrator",
+    "jurisdiction": [
+      "CA"
+    ],
+    "listing": [
+      "https://www.ricepoint.com/"
+    ],
+    "follow": [
+      "^https://ricepoint\\.com/"
+    ],
+    "disabled": true,
+    "notes": "DISABLED: 403 to every client tried. Worth re-checking, since administrators are the authoritative source for deadlines."
+  },
+  {
+    "id": "cba-database",
+    "name": "Canadian Bar Association class action database",
+    "kind": "registry",
+    "jurisdiction": [
+      "CA"
+    ],
+    "listing": [
+      "https://cbaapps.org/ClassAction/Search.aspx"
+    ],
+    "follow": [
+      "^https://cbaapps\\.org/ClassAction/"
+    ],
+    "disabled": true,
+    "notes": "DISABLED: disallowed by robots.txt, which glean treats as a hard stop. The database is also ASP.NET postback-driven and voluntary, so coverage would be partial even with permission."
+  },
+  {
+    "id": "quebec-registre",
+    "name": "Registre des actions collectives du Quebec",
+    "kind": "registry",
+    "jurisdiction": [
+      "QC"
+    ],
+    "listing": [
+      "https://www.registredesactionscollectives.quebec/en/Consulter/ApercuDemande"
+    ],
+    "follow": [
+      "^https://registredesactionscollectives\\.quebec/en/Consulter/[^/]+$"
+    ],
+    "disabled": true,
+    "notes": "DISABLED: the register fetches fine but its case list is rendered behind a search form, so a linear link scrape reaches only the explanatory pages. Would need form submission to be useful."
+  },
+  {
+    "id": "epiq-canada",
+    "name": "Epiq Canada",
+    "kind": "administrator",
+    "jurisdiction": [
+      "CA"
+    ],
+    "listing": [
+      "https://www.epiqglobal.com/en-ca"
+    ],
+    "follow": [
+      "^https://epiqglobal\\.com/en-ca/services/class-action"
+    ],
+    "disabled": true,
+    "notes": "DISABLED: the Canadian site markets the service but does not list the settlements Epiq administers, so every link is a service page."
+  }
+]

@@ -1,0 +1,66 @@
+{{define "body"}}
+<p class="sub"><a href="/">back</a></p>
+<h1>{{.S.Title}}</h1>
+<p class="sub">{{.S.Summary}}</p>
+
+<div class="card">
+  <div class="meta">
+    <span class="chip">{{.S.Stage}}</span>
+    <span class="{{.DeadlineClass}}">deadline {{.Deadline}}</span>
+    {{if gt .Payout 0.0}}<span>about ${{printf "%.0f" .Payout}} to you</span>{{end}}
+    <span>about {{.S.EffortMinutes}} min</span>
+    {{if .S.ProofRequired}}<span>proof: {{if .S.ProofNote}}{{.S.ProofNote}}{{else}}required{{end}}</span>{{end}}
+    {{if .S.Administrator}}<span>{{.S.Administrator}}</span>{{end}}
+  </div>
+  <p style="margin:.8rem 0 0">
+    {{if .S.ClaimURL}}<a href="{{.S.ClaimURL}}" rel="noreferrer noopener" target="_blank">Official claim portal</a> · {{end}}
+    <a href="{{.S.URL}}" rel="noreferrer noopener" target="_blank">Page glean read</a>
+  </p>
+</div>
+
+<h2>Are you in the class? {{.Verdict}}</h2>
+{{if .A.Note}}<p class="crit">{{.A.Note}}</p>{{end}}
+{{if .S.ClassText}}<blockquote>{{.S.ClassText}}</blockquote>{{end}}
+{{range .A.Groups}}
+  {{if gt (len .Criteria) 1}}
+    <p class="crit"><b>any one of</b> — {{.ValueStr}}</p>
+    {{range .Criteria}}<p class="crit" style="padding-left:1.2rem"><b>{{.ValueStr}}</b> {{.Reason}}</p>{{end}}
+  {{else}}
+    {{range .Criteria}}<p class="crit"><b>{{.ValueStr}}</b> {{.Reason}}</p>{{end}}
+  {{end}}
+{{end}}
+
+{{if .A.Questions}}
+<h2>Resolve it</h2>
+{{range .A.Questions}}
+<div class="q">
+  <div>{{.Ask}}</div>
+  <div>
+    <form class="inline" method="post" action="/answer"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="label" value="{{.Label}}"><input type="hidden" name="a" value="yes"><input type="hidden" name="back" value="/s/{{$.S.ID}}"><button class="primary">Yes</button></form>
+    <form class="inline" method="post" action="/answer"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="label" value="{{.Label}}"><input type="hidden" name="a" value="no"><input type="hidden" name="back" value="/s/{{$.S.ID}}"><button>No</button></form>
+  </div>
+</div>
+{{end}}
+{{end}}
+
+<h2>Your claim</h2>
+<div class="q">
+  <div>Currently: <b>{{.ClaimState}}</b></div>
+  <div>
+    {{range .States}}
+    <form class="inline" method="post" action="/claim"><input type="hidden" name="id" value="{{$.S.ID}}"><input type="hidden" name="state" value="{{.}}"><button>{{.}}</button></form>
+    {{end}}
+  </div>
+</div>
+
+<h2>Provenance</h2>
+<table>
+  <tr><td>source</td><td>{{.S.SourceID}}</td></tr>
+  <tr><td>extracted by</td><td>{{.S.Extractor}}, confidence {{printf "%.0f" .Confidence}}%</td></tr>
+  <tr><td>first seen</td><td>{{.S.FirstSeen}}</td></tr>
+  <tr><td>last seen</td><td>{{.S.LastSeen}}</td></tr>
+  {{if .S.CaseName}}<tr><td>case</td><td>{{.S.CaseName}}</td></tr>{{end}}
+  {{if .S.Court}}<tr><td>court</td><td>{{.S.Court}}</td></tr>{{end}}
+  {{if .S.SettlementFund}}<tr><td>fund</td><td>${{printf "%.0f" .S.SettlementFund}}</td></tr>{{end}}
+</table>
+{{end}}

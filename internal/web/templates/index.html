@@ -1,0 +1,66 @@
+{{define "body"}}
+<h1>{{if .Digest.Matches}}{{len .Digest.Matches}} claim{{if ne (len .Digest.Matches) 1}}s{{end}} waiting for you{{else}}Nothing to claim today{{end}}</h1>
+<p class="sub">{{.Headline}}</p>
+
+{{if .Questions}}
+<h2>Answer these first</h2>
+{{range .Questions}}
+<div class="q">
+  <div>{{.Ask}}<div class="meta"><span>unlocks about ${{printf "%.0f" .Worth}} across {{len .Unlocks}} settlement{{if ne (len .Unlocks) 1}}s{{end}}</span></div></div>
+  <div>
+    <form class="inline" method="post" action="/answer"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="label" value="{{.Label}}"><input type="hidden" name="a" value="yes"><button class="primary">Yes</button></form>
+    <form class="inline" method="post" action="/answer"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="label" value="{{.Label}}"><input type="hidden" name="a" value="no"><button>No</button></form>
+  </div>
+</div>
+{{end}}
+{{end}}
+
+{{template "items" dict "Title" "Claim these" "Items" .Digest.Matches}}
+{{template "items" dict "Title" "Closing soon" "Items" .Digest.Closing}}
+{{template "items" dict "Title" "You might qualify" "Items" .Digest.Maybes}}
+
+{{if .Claims}}
+<h2>Your claims</h2>
+<table><tr><th>Settlement</th><th>State</th><th>Filed</th><th>Amount</th></tr>
+{{range .Claims}}<tr>
+  <td><a href="/s/{{.SettlementID}}">{{.Title}}</a></td>
+  <td>{{.State}}</td><td>{{.FiledOn}}</td>
+  <td class="amount">{{if gt .Amount 0.0}}${{printf "%.2f" .Amount}}{{end}}</td>
+</tr>{{end}}
+</table>
+{{end}}
+
+<h2>Everything tracked</h2>
+{{if .All}}
+<table><tr><th>You</th><th>Value</th><th>Deadline</th><th>Stage</th><th>Settlement</th></tr>
+{{range .All}}<tr>
+  <td class="{{.Class}}">{{.Verdict}}</td>
+  <td class="amount">{{.Value}}</td>
+  <td class="{{.DeadlineClass}}">{{.Deadline}}</td>
+  <td>{{.Stage}}</td>
+  <td><a href="/s/{{.ID}}">{{.Title}}</a></td>
+</tr>{{end}}
+</table>
+{{else}}<p class="empty">Nothing yet. Run <code>glean scan</code>.</p>{{end}}
+{{end}}
+
+{{define "items"}}
+{{if .Items}}
+<h2>{{.Title}}</h2>
+{{range .Items}}
+<div class="card">
+  <div class="row">
+    <h3><a href="/s/{{.Settlement.ID}}">{{.Settlement.Title}}</a></h3>
+    <span class="amount">{{if gt .Assessment.Payout 0.0}}${{printf "%.0f" .Assessment.Payout}}{{else}}?{{end}}</span>
+  </div>
+  <div class="meta">
+    <span class="chip">{{.Reason}}</span>
+    {{if .Settlement.ClaimDeadline.Zero}}{{else}}<span>deadline {{.Settlement.ClaimDeadline}}</span>{{end}}
+    <span>about {{.Settlement.EffortMinutes}} min</span>
+    {{if .Settlement.ProofRequired}}<span>proof required</span>{{end}}
+    {{if .Settlement.ClaimURL}}<a href="{{.Settlement.ClaimURL}}" rel="noreferrer noopener" target="_blank">file a claim</a>{{end}}
+  </div>
+</div>
+{{end}}
+{{end}}
+{{end}}
