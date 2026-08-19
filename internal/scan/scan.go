@@ -10,6 +10,8 @@ package scan
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -248,18 +250,31 @@ func visit(ctx context.Context, st *store.Store, client *fetch.Client, router *e
 		return out
 	}
 
-	// A page that has not changed since the last pass, and that we already have a
-	// record for, needs nothing further. The hash check is what makes a daily
-	// scan nearly free.
+	text := htmlx.ExtractText(resp.Body)
+
+	// Change detection runs on the readable text, not on the bytes.
+	//
+	// The bytes are useless for this. Sites emit a rotating CSRF token, a
+	// session id, an ad slot or a "generated at" comment on every response, so
+	// a byte hash reports that a notice changed overnight when not one word of
+	// it did. The first version compared bytes, and a re-scan of a store that
+	// was one day old re-extracted 77 of 91 pages and cost as much as the cold
+	// start, which defeats the entire point of scanning on a schedule.
+	//
+	// Fetching and stripping the markup is microseconds and no money. The model
+	// call is all of the money. So the gate belongs after the text is in hand
+	// and before the model is asked anything.
+	sum := sha256.Sum256([]byte(text))
+	textHash := hex.EncodeToString(sum[:])
+
 	mu.Lock()
-	known := st.Settlement(model.NewID(cand.URL)) != nil
+	prev := st.Settlement(model.NewID(cand.URL))
 	mu.Unlock()
-	if known && !resp.Changed && !opts.Refetch {
+	if prev != nil && prev.ContentHash == textHash && !opts.Refetch {
 		out.unchanged = true
 		return out
 	}
 
-	text := htmlx.ExtractText(resp.Body)
 	if extract.Relevance(text) < opts.MinRelevance {
 		out.irrelevant = true
 		return out
@@ -323,7 +338,7 @@ func visit(ctx context.Context, st *store.Store, client *fetch.Client, router *e
 	}
 
 	s.SourceID = src.ID
-	s.ContentHash = resp.Hash
+	s.ContentHash = textHash
 	if len(s.Jurisdiction) == 0 {
 		s.Jurisdiction = src.Jurisdiction
 	}

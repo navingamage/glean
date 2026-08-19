@@ -164,8 +164,15 @@ Against the current registry, with `google/gemini-3.7-flash`:
 ```
 
 Forty-five records, forty-one distinct proceedings once duplicates are merged,
-for fourteen cents. A second scan the next day re-reads none of the unchanged
-pages and costs almost nothing.
+for fourteen cents.
+
+A second scan the next day should cost close to nothing, because a page whose
+text has not changed is never sent to a model. Getting that right took two
+attempts: the first version compared the raw bytes of a response, and since
+sites emit a fresh CSRF token, session id or ad slot every time, 77 of 91 pages
+looked changed overnight and a daily scan cost as much as a cold start. The
+comparison is now on the readable text, which is free to compute and is the only
+thing a re-extraction could learn anything from.
 
 Two model tiers, because reading a deadline is transcription and decomposing a
 class definition is not. See [docs/models.md](docs/models.md).

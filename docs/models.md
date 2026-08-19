@@ -75,9 +75,16 @@ and 900 output tokens, which is what a Canadian settlement notice actually costs
 to read once the markup is stripped.
 
 The headline result is that it does not matter much. A full first scan of the
-whole registry lands between two and twenty cents depending on the model, and a
-steady-state daily run costs a fraction of that, because only pages whose content
-hash changed since yesterday are extracted at all.
+whole registry lands between two and twenty cents depending on the model.
+
+A steady-state daily run should cost far less, because only pages whose readable
+text changed since the last pass are sent to a model at all. That qualifier is
+load-bearing and was wrong at first: the comparison originally ran on the raw
+bytes of the response, and sites emit a rotating CSRF token, session id or ad
+slot on every request, so a scan of a one-day-old store re-extracted 77 of 91
+pages and cost as much as the cold start. Stripping the markup first costs
+microseconds and no money, and is the only comparison that answers the question
+being asked, which is whether a re-extraction could learn anything new.
 
 So choose on accuracy. The failure that costs money here is a model that reads
 "purchased bread at Loblaws, No Frills or Zehrs" as three separate requirements
@@ -120,6 +127,13 @@ source ~/.config/antipode/load-secrets.sh
 
 Omitting the value after `-w` makes the tool prompt for it, so the key never
 lands in shell history.
+
+## Upgrading an existing store
+
+Records written before the text-hash change carry a byte hash in the same field,
+so the first scan after upgrading finds nothing matching and re-extracts
+everything once, at roughly the cost of a cold start. Every scan after that
+settles down. There is no migration to run; it is one scan.
 
 ## Cost reporting
 

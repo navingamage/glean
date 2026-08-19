@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -19,7 +20,10 @@ const listingHTML = `<html><body><h1>Our cases</h1><ul>
 <li><a href="/cases/careers">Careers</a></li>
 </ul></body></html>`
 
-const noticeHTML = `<html><head><title>Packaged bread price-fixing - Example Law</title></head><body>
+const noticeHTML = `<html><head><title>Packaged bread price-fixing - Example Law</title></head><body>` +
+	noticeBody + `</body></html>`
+
+const noticeBody = `
 <h1>Packaged bread price-fixing class action settlement</h1>
 <p>A class action was commenced on behalf of all persons resident in Canada who
 purchased packaged bread. The settlement has been approved by the court.</p>
@@ -28,7 +32,7 @@ October 15, 2026. Each class member is eligible to receive up to $25.</p>
 <p>The settlement fund is $500 million. To opt out you must exclude yourself by
 March 1, 2026. No proof of purchase is required.</p>
 <p>A claims administrator has been appointed and the claim form is available online.</p>
-</body></html>`
+`
 
 // A page that is on the site and matches the follow pattern, but is not a class
 // action. The relevance gate is the only thing standing between this and a model
@@ -184,4 +188,123 @@ func TestSecondScanIsCheapAndFindsNothingNew(t *testing.T) {
 	}
 	_ = filepath.Join(dir, "events.jsonl")
 	_ = strings.TrimSpace("")
+}
+
+func TestRotatingMarkupDoesNotTriggerReExtraction(t *testing.T) {
+	// Real sites emit a fresh CSRF token, session id or ad slot on every
+	// response. A byte-level hash reports the notice as changed every night and
+	// pays for a full re-extraction of a page whose text is word for word
+	// identical. That mistake made a daily scan cost the same as a cold start.
+	var serves int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		switch r.URL.Path {
+		case "/robots.txt":
+			http.NotFound(w, r)
+		case "/cases":
+			// A rotating token in the listing markup too, so nothing is cached.
+			fmt.Fprintf(w, `<html><body><input name="csrf" value="tok-%d">%s</body></html>`,
+				serves, listingHTML)
+		case "/cases/bread":
+			serves++
+			fmt.Fprintf(w, `<html><head><title>Packaged bread price-fixing - Example Law</title>
+				<script>var session = "s-%d";</script></head>
+				<body><!-- generated at request %d -->%s</body></html>`,
+				serves, serves, noticeBody)
+		default:
+			w.Write([]byte(boilerplateHTML))
+		}
+	}))
+	defer srv.Close()
+
+	src := &source.Source{ID: "test", Listing: []string{srv.URL + "/cases"},
+		Follow: []string{`/cases/[^/]+$`}}
+	if err := src.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	opts := DefaultOptions()
+	opts.Workers = 1
+
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first := Run(context.Background(), st, []*source.Source{src}, nil, opts); len(first.New) != 1 {
+		t.Fatalf("first pass found %d, want 1", len(first.New))
+	}
+
+	st2, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := Run(context.Background(), st2, []*source.Source{src}, nil, opts)
+	if second.Unchanged != 1 {
+		t.Errorf("counted %d unchanged, want 1: the bytes differ every request but the words do not", second.Unchanged)
+	}
+	if second.Extracted != 0 {
+		t.Errorf("re-extracted %d page(s) whose text was identical", second.Extracted)
+	}
+	if len(second.Updated) != 0 {
+		t.Errorf("reported changes on an unchanged notice: %v", second.Updated)
+	}
+}
+
+func TestRealTextChangeIsStillNoticed(t *testing.T) {
+	// The other half of the same guarantee: a deadline that actually moves has
+	// to be seen, or the gate has been made too loose.
+	deadline := "October 15, 2026"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		switch r.URL.Path {
+		case "/robots.txt":
+			http.NotFound(w, r)
+		case "/cases":
+			w.Write([]byte(listingHTML))
+		case "/cases/bread":
+			fmt.Fprintf(w, `<html><head><title>Bread - Example Law</title></head><body>
+				<p>A class action settlement for all persons resident in Canada who
+				purchased packaged bread has been approved by the court.</p>
+				<p>Class members may file a claim using the claim form. The claims
+				deadline is %s. Each class member may receive up to $25.</p>
+				<p>A claims administrator has been appointed.</p></body></html>`, deadline)
+		default:
+			w.Write([]byte(boilerplateHTML))
+		}
+	}))
+	defer srv.Close()
+
+	src := &source.Source{ID: "test", Listing: []string{srv.URL + "/cases"},
+		Follow: []string{`/cases/[^/]+$`}}
+	if err := src.Compile(); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	opts := DefaultOptions()
+	opts.Workers = 1
+
+	st, _ := store.Open(dir)
+	Run(context.Background(), st, []*source.Source{src}, nil, opts)
+
+	deadline = "September 1, 2026" // the notice is amended overnight
+	st2, _ := store.Open(dir)
+	second := Run(context.Background(), st2, []*source.Source{src}, nil, opts)
+
+	if second.Unchanged != 0 {
+		t.Fatal("a moved deadline was skipped as unchanged")
+	}
+	if len(second.Updated) != 1 {
+		t.Fatalf("reported %d changes, want 1", len(second.Updated))
+	}
+	var found bool
+	for _, changes := range second.Updated {
+		for _, c := range changes {
+			if c.Field == "claim_deadline" && c.From == "2026-10-15" && c.To == "2026-09-01" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("the deadline change was not recorded: %v", second.Updated)
+	}
 }
