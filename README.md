@@ -155,6 +155,20 @@ See [docs/models.md](docs/models.md) for how the model is chosen and what it
 costs, and [docs/running.md](docs/running.md) for putting it on a schedule and
 getting the reminders onto a phone.
 
+## In production
+
+`worker/` is the hosted version: a Cloudflare Worker with a D1 database that
+scans on a cron trigger and serves a private, authenticated dashboard. A Worker
+rather than a Pages project because Pages Functions cannot be scheduled, and a
+deployment that only ran when someone visited it would give away the entire
+premise.
+
+The domain logic is duplicated across Go and TypeScript, which is a real cost
+and not an accident: Workers runs JavaScript and WASM, and Go's networking and
+filesystem do not survive that transition. The pure parts were ported with their
+tests, so the behaviour is pinned rather than approximated. See
+[worker/DEPLOY.md](worker/DEPLOY.md).
+
 ### What a real scan looks like
 
 Against the current registry, with `google/gemini-3.7-flash`:

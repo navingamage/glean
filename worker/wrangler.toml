@@ -1,0 +1,29 @@
+name = "glean"
+main = "src/index.ts"
+compatibility_date = "2026-08-19"
+
+# A Worker rather than a Pages project, for one reason: Pages Functions cannot
+# be scheduled. The entire premise of glean is that it looks for this money
+# without being asked, and a deployment that only runs when someone visits it
+# would give that back.
+[triggers]
+crons = ["30 12 * * *"]   # 08:30 America/Toronto, in UTC
+
+[[d1_databases]]
+binding = "DB"
+database_name = "glean"
+# Replaced by `wrangler d1 create glean`. Local dev never calls the API for
+# this, so the placeholder is fine until a real database exists.
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[vars]
+# Both tiers, overridable without a code change. See docs/models.md.
+GLEAN_MODEL_CHEAP = "google/gemini-2.5-flash-lite"
+GLEAN_MODEL_PRIME = "google/gemini-3.7-flash"
+# Candidate pages followed per source per scan.
+GLEAN_PER_SOURCE = "40"
+
+# Secrets, set with `wrangler secret put <name>`, never written to this file:
+#   OPENROUTER_API_KEY   required for class definitions
+#   GLEAN_ACCESS_KEY     required; gates the dashboard
+#   GLEAN_WEBHOOK        optional; where the digest is posted

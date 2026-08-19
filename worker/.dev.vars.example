@@ -1,0 +1,5 @@
+# Local development only. Copy to .dev.vars, which is gitignored.
+# In production these are set with `wrangler secret put <name>`.
+GLEAN_ACCESS_KEY = "a-long-random-string-you-choose"
+OPENROUTER_API_KEY = ""
+GLEAN_WEBHOOK = ""
