@@ -24,14 +24,22 @@ CREATE TABLE IF NOT EXISTS hashes (
   hash TEXT NOT NULL
 );
 
+-- Claims and profiles are per person; settlements are not.
+--
+-- A settlement is a public fact about a proceeding, it costs money to extract,
+-- and scanning once for everybody is the whole efficiency argument. What
+-- somebody answered about their own bank accounts, and what they have claimed,
+-- belongs to them alone. `user` is a verified Cloudflare Access email, or
+-- 'owner' when Access is not in front and the shared key is the only gate.
 CREATE TABLE IF NOT EXISTS claims (
-  settlement_id TEXT PRIMARY KEY,
-  data          TEXT NOT NULL
+  user          TEXT NOT NULL,
+  settlement_id TEXT NOT NULL,
+  data          TEXT NOT NULL,
+  PRIMARY KEY (user, settlement_id)
 );
 
--- One row. The profile is a single document and is never shared.
 CREATE TABLE IF NOT EXISTS profile (
-  id   INTEGER PRIMARY KEY CHECK (id = 1),
+  user TEXT PRIMARY KEY,
   data TEXT NOT NULL
 );
 
@@ -43,9 +51,21 @@ CREATE TABLE IF NOT EXISTS events (
   at            TEXT NOT NULL,
   type          TEXT NOT NULL,
   settlement_id TEXT,
+  user          TEXT,
   data          TEXT
 );
 CREATE INDEX IF NOT EXISTS events_at ON events(at);
+
+-- When each source was last walked.
+--
+-- One invocation cannot cover the whole registry, so sources are taken
+-- least-recently-scanned first. Without this the same few sources at the top of
+-- the list would be rescanned every run and the ones at the bottom would never
+-- be reached at all.
+CREATE TABLE IF NOT EXISTS source_state (
+  id           TEXT PRIMARY KEY,
+  last_scanned TEXT NOT NULL
+);
 
 -- Conditional-GET state, so a re-scan of forty pages costs forty conditional
 -- requests and almost no bytes.

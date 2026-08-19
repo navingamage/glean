@@ -9,6 +9,20 @@ asked, and a deployment that only ran when someone visited it would give that
 back. Every other Antipode property is a static Pages site; this one is not, and
 that difference is deliberate.
 
+## Status
+
+Live at **https://glean.antipodetech.com**, gated, scanning every ten minutes.
+The `workers.dev` URL is deliberately disabled so there is one door.
+
+The access key was generated during deploy and put in the Keychain rather than
+printed, so it is not in any transcript. Retrieve it with:
+
+```bash
+security find-generic-password -a "$USER" -s antipode-glean-access-key -w
+```
+
+Sign in once per device at `https://glean.antipodetech.com/?k=THE_KEY`.
+
 ## What you have to do first
 
 **The existing `CLOUDFLARE_API_TOKEN` cannot deploy this.** It is scoped to
@@ -29,6 +43,12 @@ existing token (or make a second one) and add:
 | D1 | Edit | create and migrate the database |
 | Workers KV Storage | Edit | wrangler's deployment bookkeeping |
 | Zone → DNS | Edit | attach `glean.antipodetech.com` |
+| Zone → Workers Routes | Edit | see below; currently missing |
+
+The custom domain is attached and working, but every `wrangler deploy` ends with
+a non-fatal error reconciling `/zones/:id/workers/routes`. The Worker uploads and
+goes live regardless; only the route re-assertion fails. Adding **Workers
+Routes: Edit** to the token clears it.
 
 Then replace the Keychain item, which prompts so the token never enters shell
 history:
@@ -90,28 +110,78 @@ This matters more here than on a normal site. The profile behind the dashboard i
 a list of every bank, shop, insurer and employer you have answered a question
 about. It should not be one guessed URL away from anyone.
 
-Cloudflare Access (Zero Trust) is the better answer if you want it: it gates on
-your email with a one-time code, needs no secret in a URL, and the free tier
-covers this. It is configured in the Zero Trust dashboard rather than in code, so
-it is not set up here. The shared key stands until then, and the two compose
-fine if you add Access later.
+## Access, and per-person profiles
 
-## Scheduling
+Settlements are shared; profiles and claims are not. A settlement is a public
+fact about a proceeding that costs money to extract, and scanning once for
+everybody is the whole efficiency argument. What somebody answered about their
+own bank accounts belongs to them.
 
-`[triggers] crons = ["30 12 * * *"]` in `wrangler.toml`, which is 08:30 in
-Toronto. Change it there and redeploy.
+Identity comes from Cloudflare Access when it is in front. Set two vars and
+redeploy:
 
-Trigger a scan by hand without waiting:
-
-```bash
-wrangler dev --test-scheduled   # then: curl 'http://localhost:8788/__scheduled'
+```toml
+GLEAN_ACCESS_TEAM = "your-team"    # <team>.cloudflareaccess.com
+GLEAN_ACCESS_AUD  = "the application audience tag"
 ```
 
-A Worker invocation is not unbounded, so the scan carries a wall-clock budget and
-stops cleanly when it runs out. That is not a failure: everything extracted
-before the cutoff is committed, and the next run resumes on the pages it did not
-reach, because their hashes are still missing. A cold first scan over the whole
-registry may take two or three runs to work through.
+Until those are set, every signed-in request is a single `owner` identity, which
+is the right answer when the shared key is the only gate.
+
+The `Cf-Access-Authenticated-User-Email` header is never trusted. Access sets it,
+but so can anyone reaching the Worker without going through Access, and trusting
+it would let a stranger read any user's profile by naming them. What is verified
+is `Cf-Access-Jwt-Assertion`: an RS256 signature checked against the team's
+published keys, with issuer, audience and expiry all checked. There are tests for
+the forgeries, including `alg: none` and a token signed with the wrong key.
+
+At the time of deployment the Cloudflare API reported Access as **not enabled**
+on this account (`access.api.error.not_enabled` from two separate endpoints), so
+the shared key is doing the work. That is worth confirming in the Zero Trust
+dashboard before relying on per-person profiles.
+
+## Scheduling, and why it runs so often
+
+Every ten minutes, each run doing very little. That is not a preference; it is
+what the platform allows, and it took three attempts to find out.
+
+A first deployment ran the scan on a daily cron with a four-minute budget, the
+same shape the Go version uses. It stored three settlements and never recorded
+that it had run at all. The second attempt assumed the cause was the subrequest
+cap, fifty per invocation on the free plan against a registry needing several
+hundred, and added a request budget with least-recently-scanned source rotation.
+It got to six settlements and still never recorded a summary.
+
+The actual constraint is wall clock inside `waitUntil`. A prime extraction takes
+five to twenty seconds, so any pass measured in minutes is killed by the platform
+before it can commit anything about itself, which is exactly how a run that had
+quietly stored six settlements managed to look like it had done nothing.
+
+So a pass is held to twenty seconds and forty outbound requests, and reports
+honestly when it stops:
+
+```
+50 candidates, 10 fetched, 0 unchanged, 7 not relevant, 3 extracted, 3 new,
+15 requests over 2 source(s), stopped on budget and will resume next run
+3 model call(s), $0.0017
+```
+
+Stopping is the normal case, not a failure. Everything extracted is committed as
+it goes, sources are taken least-recently-scanned first so coverage rotates
+rather than rescanning the top of the list, and a page already read costs one
+request because its content hash is stored. A cold registry takes most of a day
+to work through at roughly three pages per run. After that the runs are nearly
+free: a page whose readable text has not changed is never sent to a model, so
+frequent invocations cost requests rather than money.
+
+Trigger a pass by hand from the dashboard's **Scan now** button, or:
+
+```bash
+curl -X POST -H "Cookie: glean_session=$(security find-generic-password -a "$USER" -s antipode-glean-access-key -w)" \
+  https://glean.antipodetech.com/scan
+```
+
+Locally: `wrangler dev --test-scheduled`, then `curl localhost:8788/__scheduled`.
 
 ## Cost
 

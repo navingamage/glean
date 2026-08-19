@@ -2,19 +2,36 @@ name = "glean"
 main = "src/index.ts"
 compatibility_date = "2026-08-19"
 
+# One door, on purpose. A workers.dev URL bypasses anything sitting in front of
+# the custom domain, so leaving it enabled would mean Cloudflare Access guards
+# glean.antipodetech.com while the same Worker stays reachable beside it.
+workers_dev = false
+preview_urls = false
+
+routes = [{ pattern = "glean.antipodetech.com", custom_domain = true }]
+
 # A Worker rather than a Pages project, for one reason: Pages Functions cannot
 # be scheduled. The entire premise of glean is that it looks for this money
 # without being asked, and a deployment that only runs when someone visits it
 # would give that back.
+# Every ten minutes, each run doing a little.
+#
+# One invocation cannot walk the registry. Wall clock is the binding constraint,
+# not subrequests: a prime extraction takes five to twenty seconds, so a pass is
+# held to twenty seconds and gets through a handful of pages. Sources are taken
+# least-recently-scanned first, so coverage rotates rather than rescanning the
+# top of the list forever.
+#
+# Frequent runs are cheap because they are mostly idle work: a page whose text
+# has not changed is never sent to a model, so once the backlog clears these
+# invocations cost requests rather than money.
 [triggers]
-crons = ["30 12 * * *"]   # 08:30 America/Toronto, in UTC
+crons = ["*/10 * * * *"]
 
 [[d1_databases]]
 binding = "DB"
 database_name = "glean"
-# Replaced by `wrangler d1 create glean`. Local dev never calls the API for
-# this, so the placeholder is fine until a real database exists.
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "ec3d1782-56e6-4e35-8348-f3bf388df7d6"
 
 [vars]
 # Both tiers, overridable without a code change. See docs/models.md.
@@ -22,6 +39,9 @@ GLEAN_MODEL_CHEAP = "google/gemini-2.5-flash-lite"
 GLEAN_MODEL_PRIME = "google/gemini-3.7-flash"
 # Candidate pages followed per source per scan.
 GLEAN_PER_SOURCE = "40"
+# Kept under the platform subrequest cap (50 free, 1000 paid). Raise on paid.
+GLEAN_REQUEST_BUDGET = "40"
+GLEAN_DEADLINE_MS = "20000"
 
 # Secrets, set with `wrangler secret put <name>`, never written to this file:
 #   OPENROUTER_API_KEY   required for class definitions

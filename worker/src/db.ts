@@ -89,43 +89,73 @@ export class Store {
       s.first_seen, s.last_seen).run();
   }
 
-  async event(type: string, settlementId: string, data: unknown): Promise<void> {
-    await this.db.prepare("INSERT INTO events (at, type, settlement_id, data) VALUES (?, ?, ?, ?)")
-      .bind(new Date().toISOString(), type, settlementId, JSON.stringify(data)).run();
+  async event(type: string, settlementId: string, data: unknown, user = ""): Promise<void> {
+    await this.db
+      .prepare("INSERT INTO events (at, type, settlement_id, user, data) VALUES (?, ?, ?, ?, ?)")
+      .bind(new Date().toISOString(), type, settlementId, user, JSON.stringify(data)).run();
   }
 
-  async claims(): Promise<Claim[]> {
-    const { results } = await this.db.prepare("SELECT data FROM claims").all<{ data: string }>();
+  async claims(user: string): Promise<Claim[]> {
+    const { results } = await this.db.prepare("SELECT data FROM claims WHERE user = ?")
+      .bind(user).all<{ data: string }>();
     return results.map((r) => JSON.parse(r.data) as Claim);
   }
 
-  async claim(id: string): Promise<Claim | undefined> {
-    const row = await this.db.prepare("SELECT data FROM claims WHERE settlement_id = ?")
-      .bind(id).first<{ data: string }>();
+  async claim(user: string, id: string): Promise<Claim | undefined> {
+    const row = await this.db
+      .prepare("SELECT data FROM claims WHERE user = ? AND settlement_id = ?")
+      .bind(user, id).first<{ data: string }>();
     return row ? (JSON.parse(row.data) as Claim) : undefined;
   }
 
-  async setClaim(c: Claim): Promise<void> {
+  async setClaim(user: string, c: Claim): Promise<void> {
     const next = { ...c, updated_on: today() };
     await this.db.prepare(
-      `INSERT INTO claims (settlement_id, data) VALUES (?, ?)
-       ON CONFLICT(settlement_id) DO UPDATE SET data = excluded.data`,
-    ).bind(next.settlement_id, JSON.stringify(next)).run();
-    await this.event("claim", next.settlement_id, next);
+      `INSERT INTO claims (user, settlement_id, data) VALUES (?, ?, ?)
+       ON CONFLICT(user, settlement_id) DO UPDATE SET data = excluded.data`,
+    ).bind(user, next.settlement_id, JSON.stringify(next)).run();
+    await this.event("claim", next.settlement_id, next, user);
   }
 
-  async profile(): Promise<Profile> {
-    const row = await this.db.prepare("SELECT data FROM profile WHERE id = 1")
-      .first<{ data: string }>();
+  /** Every identity starts from the default profile rather than inheriting one. */
+  async profile(user: string): Promise<Profile> {
+    const row = await this.db.prepare("SELECT data FROM profile WHERE user = ?")
+      .bind(user).first<{ data: string }>();
     return row ? (JSON.parse(row.data) as Profile) : defaultProfile();
   }
 
-  async saveProfile(p: Profile): Promise<void> {
+  async saveProfile(user: string, p: Profile): Promise<void> {
     const next = { ...p, updated_on: today() };
     await this.db.prepare(
-      `INSERT INTO profile (id, data) VALUES (1, ?)
-       ON CONFLICT(id) DO UPDATE SET data = excluded.data`,
-    ).bind(JSON.stringify(next)).run();
+      `INSERT INTO profile (user, data) VALUES (?, ?)
+       ON CONFLICT(user) DO UPDATE SET data = excluded.data`,
+    ).bind(user, JSON.stringify(next)).run();
+  }
+
+  /** Identities with a profile, for the scheduled digest. */
+  async users(): Promise<string[]> {
+    const { results } = await this.db.prepare("SELECT user FROM profile").all<{ user: string }>();
+    return results.map((r) => r.user);
+  }
+
+  /**
+   * Sources least-recently-scanned first. One invocation cannot cover the whole
+   * registry, so without rotation the sources at the top of the list would be
+   * rescanned every run and the ones at the bottom never reached.
+   */
+  async sourceOrder(ids: string[]): Promise<string[]> {
+    const { results } = await this.db
+      .prepare("SELECT id, last_scanned FROM source_state").all<{ id: string; last_scanned: string }>();
+    const seen = new Map(results.map((r) => [r.id, r.last_scanned]));
+    // Never-scanned sources sort first, which is what clears a cold backlog.
+    return [...ids].sort((a, b) => (seen.get(a) ?? "").localeCompare(seen.get(b) ?? ""));
+  }
+
+  async markScanned(id: string): Promise<void> {
+    await this.db.prepare(
+      `INSERT INTO source_state (id, last_scanned) VALUES (?, ?)
+       ON CONFLICT(id) DO UPDATE SET last_scanned = excluded.last_scanned`,
+    ).bind(id, new Date().toISOString()).run();
   }
 
   async cacheGet(url: string): Promise<{ etag: string; modified: string; hash: string } | undefined> {

@@ -6,6 +6,7 @@
  * without being asked. A deployment that only ran when someone visited it would
  * give that back.
  */
+import { identify } from "./access";
 import { authorize } from "./auth";
 import { Store } from "./db";
 import { Extractor, DEFAULT_CHEAP_MODEL, DEFAULT_PRIME_MODEL, usageString } from "./extract/openrouter";
@@ -27,6 +28,22 @@ export interface Env {
   GLEAN_MODEL_CHEAP?: string;
   GLEAN_MODEL_PRIME?: string;
   GLEAN_PER_SOURCE?: string;
+  /**
+   * Outbound requests one invocation may make. The platform cap is 50 on the
+   * free plan and 1000 on paid; this stays under whichever applies.
+   */
+  GLEAN_REQUEST_BUDGET?: string;
+  /**
+   * Wall-clock a single pass may take. The real constraint on Workers, not
+   * subrequests: a prime extraction takes five to twenty seconds, so a pass
+   * measured in minutes is killed before it can commit its summary.
+   */
+  GLEAN_DEADLINE_MS?: string;
+  // Set these to scope profiles per person behind Cloudflare Access. Without
+  // them every signed-in request is the single owner identity, which is correct
+  // when the shared key is the only gate.
+  GLEAN_ACCESS_TEAM?: string;
+  GLEAN_ACCESS_AUD?: string;
 }
 
 function extractorFor(env: Env): Extractor | undefined {
@@ -52,9 +69,9 @@ async function primaries(store: Store): Promise<{ list: Settlement[]; canonical:
   return { list, canonical };
 }
 
-async function assessAll(store: Store) {
+async function assessAll(store: Store, user: string) {
   const { list, canonical } = await primaries(store);
-  const profile = await store.profile();
+  const profile = await store.profile(user);
   const byId = new Map(list.map((s) => [s.id, s]));
   const as = list.map((s) => assess(s, profile));
   rank(as, byId);
@@ -62,18 +79,25 @@ async function assessAll(store: Store) {
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const auth = authorize(req, env.GLEAN_ACCESS_KEY);
     if (!auth.ok) return auth.response;
 
     const store = new Store(env.DB);
     const url = new URL(req.url);
+    const user = await identify(req, env.GLEAN_ACCESS_TEAM, env.GLEAN_ACCESS_AUD);
 
     try {
-      if (req.method === "POST" && url.pathname === "/answer") return await postAnswer(req, store);
-      if (req.method === "POST" && url.pathname === "/claim") return await postClaim(req, store);
-      if (url.pathname.startsWith("/s/")) return await showPage(store, url.pathname.slice(3));
-      if (url.pathname === "/") return await indexPage(store);
+      if (req.method === "POST" && url.pathname === "/scan") {
+        // A scan takes minutes, so it outlives the response. waitUntil keeps the
+        // invocation alive without making the caller hold the connection open.
+        ctx.waitUntil(scan(env));
+        return redirect("/");
+      }
+      if (req.method === "POST" && url.pathname === "/answer") return await postAnswer(req, store, user);
+      if (req.method === "POST" && url.pathname === "/claim") return await postClaim(req, store, user);
+      if (url.pathname.startsWith("/s/")) return await showPage(store, user, url.pathname.slice(3));
+      if (url.pathname === "/") return await indexPage(store, user);
       return new Response("not found", { status: 404 });
     } catch (e) {
       return new Response(`glean: ${e}`, { status: 500 });
@@ -92,22 +116,35 @@ async function scan(env: Env): Promise<void> {
   const opts = defaultOptions();
   const per = parseInt(env.GLEAN_PER_SOURCE ?? "", 10);
   if (per > 0) opts.perSource = per;
+  const budget = parseInt(env.GLEAN_REQUEST_BUDGET ?? "", 10);
+  if (budget > 0) opts.requestBudget = budget;
+  const ms = parseInt(env.GLEAN_DEADLINE_MS ?? "", 10);
+  if (ms > 0) opts.deadlineMs = ms;
 
   const res = await runScan(store, sources, extractor, opts);
   const line = summarize(res) +
     (extractor ? `\n${usageString(extractor.usage, extractor.models())}` : "");
+  // Written before the digest, because the digest reads the whole store and is
+  // the more likely of the two to be cut off. Losing the summary of a pass that
+  // did real work is how the first deployment looked like it had done nothing.
   await store.event("scan", "", { summary: line, errors: res.errors.slice(0, 20) });
 
   if (!env.GLEAN_WEBHOOK) return;
-  const digest = await digestText(store, new Set(res.newIds));
-  if (!digest) return;
-  try {
-    await fetch(env.GLEAN_WEBHOOK, {
-      method: "POST",
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
-      body: digest + "\n\n" + line,
-    });
-  } catch { /* a broken webhook must not fail the scan */ }
+  // One digest per person, because what is newly claimable depends on whose
+  // profile is being matched against. With no Access in front there is exactly
+  // one identity and this is a single message.
+  const users = await store.users();
+  for (const user of users.length ? users : ["owner"]) {
+    const digest = await digestText(store, user, new Set(res.newIds));
+    if (!digest) continue;
+    try {
+      await fetch(env.GLEAN_WEBHOOK, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain; charset=utf-8" },
+        body: digest + "\n\n" + line,
+      });
+    } catch { /* a broken webhook must not fail the scan */ }
+  }
 }
 
 /**
@@ -117,9 +154,9 @@ async function scan(env: Env): Promise<void> {
  */
 const REMINDER_DAYS = [30, 14, 7, 3, 1, 0];
 
-async function digestText(store: Store, newIds: Set<string>): Promise<string> {
-  const { as, byId } = await assessAll(store);
-  const claims = new Map((await store.claims()).map((c) => [c.settlement_id, c]));
+async function digestText(store: Store, user: string, newIds: Set<string>): Promise<string> {
+  const { as, byId } = await assessAll(store, user);
+  const claims = new Map((await store.claims(user)).map((c) => [c.settlement_id, c]));
   const lines: string[] = [];
 
   for (const a of as) {
@@ -143,8 +180,8 @@ async function digestText(store: Store, newIds: Set<string>): Promise<string> {
   return lines.length ? "glean\n\n" + lines.join("\n") : "";
 }
 
-async function indexPage(store: Store): Promise<Response> {
-  const { as, byId, canonical } = await assessAll(store);
+async function indexPage(store: Store, user: string): Promise<Response> {
+  const { as, byId, canonical } = await assessAll(store, user);
   const qs = questions(as).slice(0, 6);
   const atStake = totalAtStake(questions(as), as);
 
@@ -166,7 +203,7 @@ async function indexPage(store: Store): Promise<Response> {
       </div></div>`;
   };
 
-  const claimsRows = (await store.claims())
+  const claimsRows = (await store.claims(user))
     .filter((c) => c.state !== "new")
     .map((c) => {
       const s = byId.get(canonical.get(c.settlement_id) ?? c.settlement_id);
@@ -199,16 +236,22 @@ ${closing.length ? `<h2>Closing soon</h2>${closing.slice(0, 8).map(card).join(""
 ${claimsRows ? `<h2>Your claims</h2><table><tr><th>Settlement</th><th>State</th><th>Filed</th><th>Amount</th></tr>${claimsRows}</table>` : ""}
 <h2>Everything tracked</h2>
 ${rows ? `<table><tr><th>You</th><th>Value</th><th>Deadline</th><th>Stage</th><th>Settlement</th></tr>${rows}</table>`
-    : `<p class="sub">Nothing yet. The next scheduled scan will fill this in.</p>`}`;
+    : `<p class="sub">Nothing yet. A scan runs every morning; start one now if you would rather not wait.</p>`}
+<form method="post" action="/scan" style="margin-top:1.5rem">
+  <button>Scan now</button>
+  <span class="sub" style="margin-left:.6rem">
+    Reads every source. Costs cents on a cold store and almost nothing after that.</span>
+</form>`;
 
-  return html(layout("Dashboard", body, `glean &middot; ${as.length} proceedings tracked`));
+  const who = user === "owner" ? "" : ` &middot; ${esc(user)}`;
+  return html(layout("Dashboard", body, `glean &middot; ${as.length} proceedings tracked${who}`));
 }
 
-async function showPage(store: Store, id: string): Promise<Response> {
+async function showPage(store: Store, user: string, id: string): Promise<Response> {
   const s = await store.settlement(id);
   if (!s) return new Response("not found", { status: 404 });
-  const a = assess(s, await store.profile());
-  const claim = await store.claim(id);
+  const a = assess(s, await store.profile(user));
+  const claim = await store.claim(user, id);
 
   const groupsHTML = a.groups.map((g) => {
     if (g.criteria.length > 1) {
@@ -260,7 +303,7 @@ ${states.map((st) => `<form class="inline" method="post" action="/claim">
   return html(layout(s.title, body, `glean &middot; ${esc(s.id)}`));
 }
 
-async function postAnswer(req: Request, store: Store): Promise<Response> {
+async function postAnswer(req: Request, store: Store, user: string): Promise<Response> {
   const form = await req.formData();
   const raw = String(form.get("id") ?? "");
   const [kindStr, entity] = raw.split(":");
@@ -269,7 +312,7 @@ async function postAnswer(req: Request, store: Store): Promise<Response> {
   }
   const negative = String(form.get("a") ?? "") !== "yes";
   const label = String(form.get("label") ?? "") || entity;
-  const profile = await store.profile();
+  const profile = await store.profile(user);
 
   if (kindStr === "residency") {
     const code = normalizeProvince(entity);
@@ -292,12 +335,12 @@ async function postAnswer(req: Request, store: Store): Promise<Response> {
     else profile.holdings.push(h);
   }
 
-  await store.saveProfile(profile);
-  await store.event("answered", "", { kind: kindStr, entity, negative });
+  await store.saveProfile(user, profile);
+  await store.event("answered", "", { kind: kindStr, entity, negative }, user);
   return redirect(String(form.get("back") ?? "/"));
 }
 
-async function postClaim(req: Request, store: Store): Promise<Response> {
+async function postClaim(req: Request, store: Store, user: string): Promise<Response> {
   const form = await req.formData();
   const id = String(form.get("id") ?? "");
   if (!(await store.settlement(id))) return new Response("no such settlement", { status: 404 });
@@ -305,7 +348,7 @@ async function postClaim(req: Request, store: Store): Promise<Response> {
   if (!["new", "interested", "filed", "paid", "rejected", "skipped"].includes(state)) {
     return new Response("unknown state", { status: 400 });
   }
-  const prev = await store.claim(id);
+  const prev = await store.claim(user, id);
   const c: Claim = prev ?? {
     settlement_id: id, state: "new", filed_on: "", paid_on: "",
     amount: 0, updated_on: "",
@@ -314,7 +357,7 @@ async function postClaim(req: Request, store: Store): Promise<Response> {
   const day = new Date().toISOString().slice(0, 10);
   if (state === "filed" && !c.filed_on) c.filed_on = day;
   if (state === "paid") c.paid_on = day;
-  await store.setClaim(c);
+  await store.setClaim(user, c);
   return redirect("/s/" + id);
 }
 

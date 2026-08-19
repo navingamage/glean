@@ -28,6 +28,21 @@ export class Disallowed extends Error {
   }
 }
 
+/**
+ * Raised when an invocation has used its allowance of outbound requests.
+ *
+ * A Worker may make a bounded number of subrequests per invocation: fifty on the
+ * free plan. A scan of the whole registry needs several hundred, so it cannot
+ * finish in one go and must not pretend otherwise. Stopping deliberately, with
+ * everything so far committed, is the difference between a scan that resumes
+ * tomorrow and one that is killed mid-write.
+ */
+export class BudgetExhausted extends Error {
+  constructor(spent: number) {
+    super(`subrequest budget exhausted after ${spent} requests`);
+  }
+}
+
 export interface Fetched {
   url: string;
   body: string;
@@ -124,8 +139,29 @@ function parseRobots(body: string, agent: string): Robots {
 
 export class Fetcher {
   private robots = new Map<string, Robots>();
+  private spent = 0;
 
-  constructor(private store: Store, private ignoreCache = false) {}
+  constructor(
+    private store: Store,
+    private ignoreCache = false,
+    /** Outbound requests this invocation may make. Left under the platform cap. */
+    private budget = 40,
+  ) {}
+
+  /** Requests used so far, for reporting how far a pass got. */
+  get used(): number {
+    return this.spent;
+  }
+
+  remaining(): number {
+    return Math.max(0, this.budget - this.spent);
+  }
+
+  /** Charged before every outbound request, including the retry and robots.txt. */
+  private charge(): void {
+    if (this.spent >= this.budget) throw new BudgetExhausted(this.spent);
+    this.spent++;
+  }
 
   async get(rawURL: string): Promise<Fetched> {
     const u = new URL(rawURL);
@@ -144,8 +180,10 @@ export class Fetcher {
     if (cached?.etag) headers["If-None-Match"] = cached.etag;
     if (cached?.modified) headers["If-Modified-Since"] = cached.modified;
 
+    this.charge();
     let resp = await fetch(rawURL, { headers, redirect: "follow" });
-    if ((resp.status === 403 || resp.status === 406)) {
+    if ((resp.status === 403 || resp.status === 406) && this.remaining() > 0) {
+      this.charge();
       resp = await fetch(rawURL, {
         headers: { ...headers, "User-Agent": BROWSER_AGENT }, redirect: "follow",
       });
@@ -182,6 +220,7 @@ export class Fetcher {
     // a permanent refusal to crawl.
     let rules: Robots = { allow: [], disallow: [] };
     try {
+      this.charge();
       const resp = await fetch(`${key}/robots.txt`, { headers: { "User-Agent": USER_AGENT } });
       if (resp.ok) rules = parseRobots((await resp.text()).slice(0, 512 << 10), USER_AGENT);
     } catch { /* treated as absent */ }

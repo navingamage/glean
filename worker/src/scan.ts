@@ -11,7 +11,7 @@ import { Change, Store } from "./db";
 import { Extractor, NotClassAction, Tier, stakes, underspecified } from "./extract/openrouter";
 import { backfill, heuristic, relevance } from "./extract/heuristic";
 import { findPortal } from "./extract/portal";
-import { Disallowed, Fetcher, isHTML } from "./fetcher";
+import { BudgetExhausted, Disallowed, Fetcher, isHTML } from "./fetcher";
 import { cleanTitle, parse } from "./html";
 import { Settlement } from "./model";
 import { newID, sha256Hex } from "./normalize";
@@ -22,16 +22,29 @@ export interface ScanOptions {
   minRelevance: number;
   refetch: boolean;
   /**
-   * Wall-clock budget. A Worker invocation is not unbounded, and a scan that is
-   * killed halfway has still done real work: everything extracted before the
-   * cutoff is committed, and the next run picks up the pages it did not reach
-   * because their hashes are still missing.
+   * Wall-clock budget, and the outbound request allowance.
+   *
+   * A Worker invocation is bounded on both, and wall clock is the one that
+   * actually bites. A prime extraction takes five to twenty seconds, so a pass
+   * measured in minutes is killed by the platform before it can commit its
+   * summary, which is how the first deployment managed to look like it had done
+   * nothing while quietly storing six settlements.
+   *
+   * So a pass is deliberately short and expected to stop early. Stopping is not
+   * a failure: everything extracted is committed as it goes, sources are taken
+   * least-recently-scanned first, and a page already read costs one request
+   * because its content hash is stored. The backlog clears over a day of runs
+   * and then stays clear.
    */
   deadlineMs: number;
+  requestBudget: number;
 }
 
 export function defaultOptions(): ScanOptions {
-  return { perSource: 40, minRelevance: 8, refetch: false, deadlineMs: 4 * 60 * 1000 };
+  return {
+    perSource: 40, minRelevance: 8, refetch: false,
+    deadlineMs: 20_000, requestBudget: 40,
+  };
 }
 
 export interface ScanResult {
@@ -46,14 +59,17 @@ export interface ScanResult {
   updated: Record<string, Change[]>;
   errors: string[];
   ranOut: boolean;
+  requestsUsed: number;
+  sourcesWalked: number;
 }
 
 export function summarize(r: ScanResult): string {
   return `${r.candidates} candidates, ${r.fetched} fetched, ${r.unchanged} unchanged, ` +
     `${r.irrelevant} not relevant, ${r.extracted} extracted (${r.prime} prime, ` +
     `${r.escalated} escalated), ${r.newIds.length} new, ` +
-    `${Object.keys(r.updated).length} updated, ${r.errors.length} errors` +
-    (r.ranOut ? ", stopped on the time budget" : "");
+    `${Object.keys(r.updated).length} updated, ${r.errors.length} errors, ` +
+    `${r.requestsUsed} requests over ${r.sourcesWalked} source(s)` +
+    (r.ranOut ? ", stopped on budget and will resume next run" : "");
 }
 
 export async function runScan(
@@ -63,15 +79,28 @@ export async function runScan(
   opts: ScanOptions,
 ): Promise<ScanResult> {
   const started = Date.now();
-  const fetcher = new Fetcher(store, opts.refetch);
+  const fetcher = new Fetcher(store, opts.refetch, opts.requestBudget);
   const res: ScanResult = {
     candidates: 0, fetched: 0, unchanged: 0, irrelevant: 0, extracted: 0,
-    prime: 0, escalated: 0, newIds: [], updated: {}, errors: [], ranOut: false,
+    prime: 0, escalated: 0, newIds: [], updated: {}, errors: [],
+    ranOut: false, requestsUsed: 0, sourcesWalked: 0,
   };
   const outOfTime = () => Date.now() - started > opts.deadlineMs;
 
-  for (const src of sources) {
-    if (outOfTime()) { res.ranOut = true; break; }
+  const order = await store.sourceOrder(sources.map((s) => s.id));
+  const byId = new Map(sources.map((s) => [s.id, s]));
+
+  outer:
+  for (const id of order) {
+    const src = byId.get(id);
+    if (!src) continue;
+    if (outOfTime() || fetcher.remaining() <= 2) { res.ranOut = true; break; }
+
+    // Marked before the walk, not after. A source that exhausts the budget
+    // halfway must still go to the back of the queue, or it will be picked
+    // first again next run and the rest of the registry never advances.
+    await store.markScanned(src.id);
+    res.sourcesWalked++;
 
     const candidates: Candidate[] = [];
     for (const listing of src.listing) {
@@ -81,20 +110,23 @@ export async function runScan(
         const parsed = await parse(page.body, listing);
         candidates.push(...candidatesFrom(src, parsed.links, opts.perSource));
       } catch (e) {
+        if (e instanceof BudgetExhausted) { res.ranOut = true; break outer; }
         if (!(e instanceof Disallowed)) res.errors.push(`${src.id}: ${e}`);
       }
     }
     res.candidates += candidates.length;
 
     for (const cand of candidates.slice(0, opts.perSource)) {
-      if (outOfTime()) { res.ranOut = true; break; }
+      if (outOfTime()) { res.ranOut = true; break outer; }
       try {
         await visit(store, fetcher, extractor, src, cand, opts, res);
       } catch (e) {
+        if (e instanceof BudgetExhausted) { res.ranOut = true; break outer; }
         if (!(e instanceof Disallowed)) res.errors.push(`${src.id}: ${e}`);
       }
     }
   }
+  res.requestsUsed = fetcher.used;
   return res;
 }
 
