@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+#
+# Sign in to the dashboard without typing a 44-character key.
+#
+# The key lives in the Keychain and is never printed. On this Mac the browser
+# opens straight in. For a phone, `signin qr` writes a QR code to a file you
+# scan once; the cookie it sets lasts a year, so this is a per-device chore
+# rather than a daily one.
+set -euo pipefail
+
+HOST="${GLEAN_HOST:-https://glean.antipodetech.com}"
+ITEM="${GLEAN_KEY_ITEM:-antipode-glean-access-key}"
+
+KEY=$(security find-generic-password -a "$USER" -s "$ITEM" -w 2>/dev/null) || {
+  echo "signin: no Keychain item '$ITEM'" >&2
+  echo "  add it with: security add-generic-password -U -a \"\$USER\" -s $ITEM -w" >&2
+  exit 1
+}
+URL="$HOST/?k=$KEY"
+
+case "${1:-open}" in
+  open)
+    open "$URL"
+    echo "opened $HOST in your browser"
+    ;;
+  qr)
+    OUT="${2:-$HOME/Desktop/glean-signin.png}"
+    # Rendered locally; the key never leaves the machine and no service sees it.
+    python3 - "$URL" "$OUT" <<'PY'
+import sys
+try:
+    import segno
+except ImportError:
+    sys.exit("signin: needs segno (pip install segno), or use `signin copy`")
+segno.make(sys.argv[1], error="m").save(sys.argv[2], scale=8, border=2)
+PY
+    echo "wrote $OUT"
+    echo "scan it with your phone camera, once. Then delete the file."
+    ;;
+  copy)
+    printf '%s' "$URL" | pbcopy
+    echo "sign-in URL copied to the clipboard (it contains the key; paste it somewhere private)"
+    ;;
+  *)
+    echo "usage: signin [open|qr [path]|copy]" >&2
+    exit 2
+    ;;
+esac

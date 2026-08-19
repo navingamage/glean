@@ -14,14 +14,30 @@ that difference is deliberate.
 Live at **https://glean.antipodetech.com**, gated, scanning every ten minutes.
 The `workers.dev` URL is deliberately disabled so there is one door.
 
-The access key was generated during deploy and put in the Keychain rather than
-printed, so it is not in any transcript. Retrieve it with:
+## Signing in
+
+**Once per device, not once per visit.** The key is exchanged for a cookie that
+lasts a year, so after the first time you just open the URL.
 
 ```bash
-security find-generic-password -a "$USER" -s antipode-glean-access-key -w
+Scripts/signin          # opens the browser on this Mac, already signed in
+Scripts/signin qr       # writes a QR to the Desktop; scan it with a phone, once
+Scripts/signin copy     # puts the sign-in URL on the clipboard
 ```
 
-Sign in once per device at `https://glean.antipodetech.com/?k=THE_KEY`.
+The key lives in the Keychain and none of these print it. The QR is rendered
+locally, so the key never leaves the machine and no service sees it; delete the
+file afterwards. `signin qr` wants `segno` (`pip install segno`) and says so if
+it is missing, in which case `signin copy` needs nothing.
+
+Doing it by hand, if you would rather:
+
+```bash
+open "https://glean.antipodetech.com/?k=$(security find-generic-password -a "$USER" -s antipode-glean-access-key -w)"
+```
+
+Enabling Cloudflare Access retires all of this: you get an email code on any
+device and there is no key to carry.
 
 ## What you have to do first
 

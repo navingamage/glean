@@ -28,6 +28,10 @@ routes = [{ pattern = "glean.antipodetech.com", custom_domain = true }]
 [triggers]
 crons = ["*/10 * * * *"]
 
+# Logs, so a pass that misbehaves can be read rather than guessed at.
+[observability]
+enabled = true
+
 [[d1_databases]]
 binding = "DB"
 database_name = "glean"
@@ -42,6 +46,7 @@ GLEAN_PER_SOURCE = "40"
 # Kept under the platform subrequest cap (50 free, 1000 paid). Raise on paid.
 GLEAN_REQUEST_BUDGET = "40"
 GLEAN_DEADLINE_MS = "20000"
+GLEAN_MAX_EXTRACTIONS = "3"
 
 # Secrets, set with `wrangler secret put <name>`, never written to this file:
 #   OPENROUTER_API_KEY   required for class definitions

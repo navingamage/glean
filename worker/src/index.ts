@@ -39,6 +39,8 @@ export interface Env {
    * measured in minutes is killed before it can commit its summary.
    */
   GLEAN_DEADLINE_MS?: string;
+  /** Extractions per pass: the bound in the unit that actually costs time. */
+  GLEAN_MAX_EXTRACTIONS?: string;
   // Set these to scope profiles per person behind Cloudflare Access. Without
   // them every signed-in request is the single owner identity, which is correct
   // when the shared key is the only gate.
@@ -120,9 +122,21 @@ async function scan(env: Env): Promise<void> {
   if (budget > 0) opts.requestBudget = budget;
   const ms = parseInt(env.GLEAN_DEADLINE_MS ?? "", 10);
   if (ms > 0) opts.deadlineMs = ms;
+  const maxEx = parseInt(env.GLEAN_MAX_EXTRACTIONS ?? "", 10);
+  if (maxEx > 0) opts.maxExtractions = maxEx;
+
+  // Recorded before the work, not only after it.
+  //
+  // A pass runs inside waitUntil, which the platform may cut short, and the
+  // first deployments wrote their summary at the very end. When they were cut
+  // off they left no trace at all, so a scan that had quietly stored six
+  // settlements was indistinguishable from one that never ran. Bracketing the
+  // pass means the log always says at least that it started.
+  const startedAt = Date.now();
+  await store.event("scan-started", "", { at: new Date().toISOString() });
 
   const res = await runScan(store, sources, extractor, opts);
-  const line = summarize(res) +
+  const line = `${summarize(res)}, ${Math.round((Date.now() - startedAt) / 1000)}s` +
     (extractor ? `\n${usageString(extractor.usage, extractor.models())}` : "");
   // Written before the digest, because the digest reads the whole store and is
   // the more likely of the two to be cut off. Losing the summary of a pass that

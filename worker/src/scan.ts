@@ -38,12 +38,18 @@ export interface ScanOptions {
    */
   deadlineMs: number;
   requestBudget: number;
+  /**
+   * Extractions per pass. The hard bound, because it is the only one expressed
+   * in the unit that actually costs time: a prime extraction takes five to
+   * twenty seconds and everything else in a pass is milliseconds.
+   */
+  maxExtractions: number;
 }
 
 export function defaultOptions(): ScanOptions {
   return {
     perSource: 40, minRelevance: 8, refetch: false,
-    deadlineMs: 20_000, requestBudget: 40,
+    deadlineMs: 20_000, requestBudget: 40, maxExtractions: 3,
   };
 }
 
@@ -117,7 +123,10 @@ export async function runScan(
     res.candidates += candidates.length;
 
     for (const cand of candidates.slice(0, opts.perSource)) {
-      if (outOfTime()) { res.ranOut = true; break outer; }
+      if (outOfTime() || res.extracted >= opts.maxExtractions) {
+        res.ranOut = true;
+        break outer;
+      }
       try {
         await visit(store, fetcher, extractor, src, cand, opts, res);
       } catch (e) {
