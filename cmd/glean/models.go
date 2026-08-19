@@ -40,8 +40,11 @@ func cmdModels(ctx context.Context, g globalFlags, args []string) error {
 		}
 		shown++
 		mark := ""
-		if m.ID == extract.DefaultModel {
-			mark = "  <- default"
+		switch m.ID {
+		case extract.DefaultCheapModel:
+			mark = "  <- cheap tier"
+		case extract.DefaultPrimeModel:
+			mark = "  <- prime tier"
 		}
 		if !m.Usable() {
 			mark += "  (no strict schema)"
@@ -63,14 +66,19 @@ func cmdModels(ctx context.Context, g globalFlags, args []string) error {
 	fmt.Printf("settlement notice actually costs, over %d pages per scan.\n", *pages)
 	fmt.Println("Only the pages that changed since the last scan are extracted, so a")
 	fmt.Println("steady-state daily run costs a small fraction of that.")
+	fmt.Printf("\nglean runs two tiers. Current: cheap=%s prime=%s\n",
+		extract.DefaultCheapModel, extract.DefaultPrimeModel)
+	fmt.Println("  -model-cheap  transcription: deadlines, amounts, claim portals")
+	fmt.Println("  -model-prime  class definitions on settlements claimable today")
 	fmt.Println("\nAt this size the choice is about accuracy, not money: a full first scan")
 	fmt.Println("costs cents on any of these. Getting AND and OR backwards in a class")
 	fmt.Println("definition is the expensive mistake, not the price per token.")
 	fmt.Println("\nA :batch suffix is half price because the provider may queue the")
 	fmt.Println("request rather than answer it immediately, which a scan waiting on it")
 	fmt.Println("will feel as a stall. Try one before committing a schedule to it.")
-	fmt.Printf("\nPick one with:  glean -model <id> scan\n")
-	fmt.Printf("Or set it once:  export GLEAN_MODEL=<id>\n")
+	fmt.Printf("\nPick with:  glean -model-cheap <id> -model-prime <id> scan\n")
+	fmt.Printf("Set once:   export GLEAN_MODEL_CHEAP=<id> GLEAN_MODEL_PRIME=<id>\n")
+	fmt.Printf("One model:  glean -model <id> scan\n")
 	return nil
 }
 

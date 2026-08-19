@@ -73,7 +73,7 @@ func TestScanFindsAndTracksASettlement(t *testing.T) {
 
 	opts := DefaultOptions()
 	opts.Workers = 1
-	// No extractor: this is the no-API-key path, which has to work on its own.
+	// No router: this is the no-API-key path, which has to work on its own.
 	res := Run(context.Background(), st, []*source.Source{src}, nil, opts)
 
 	if len(res.Errors) > 0 {

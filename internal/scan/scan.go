@@ -49,21 +49,23 @@ type Result struct {
 	Unchanged  int
 	Irrelevant int
 	Extracted  int
+	Prime      int // extractions that went to the capable model
+	Escalated  int // cheap extractions the capable model had to redo
 	New        []*model.Settlement
 	Updated    map[string][]store.Change
 	Errors     []error
 }
 
 func (r *Result) String() string {
-	return fmt.Sprintf("%d candidates, %d fetched, %d unchanged, %d not relevant, %d extracted, %d new, %d updated, %d errors",
-		r.Candidates, r.Fetched, r.Unchanged, r.Irrelevant, r.Extracted,
+	return fmt.Sprintf("%d candidates, %d fetched, %d unchanged, %d not relevant, %d extracted (%d prime, %d escalated), %d new, %d updated, %d errors",
+		r.Candidates, r.Fetched, r.Unchanged, r.Irrelevant, r.Extracted, r.Prime, r.Escalated,
 		len(r.New), len(r.Updated), len(r.Errors))
 }
 
 // Run walks every source once. It returns a result even when some sources
 // failed: a scan that reaches fourteen of eighteen sites is a successful scan
 // with four errors attached, not a failed one.
-func Run(ctx context.Context, st *store.Store, sources []*source.Source, ex *extract.Client, opts Options) *Result {
+func Run(ctx context.Context, st *store.Store, sources []*source.Source, router *extract.Router, opts Options) *Result {
 	if opts.Workers <= 0 {
 		opts.Workers = 4
 	}
@@ -94,7 +96,7 @@ func Run(ctx context.Context, st *store.Store, sources []*source.Source, ex *ext
 				if ctx.Err() != nil {
 					return
 				}
-				out := visit(ctx, st, client, ex, src, cand, opts, &mu)
+				out := visit(ctx, st, client, router, src, cand, opts, &mu)
 				mu.Lock()
 				merge(res, out)
 				mu.Unlock()
@@ -121,7 +123,9 @@ func portalFor(s *model.Settlement, doc, pageURL string) string {
 // page turned out to be about this settlement at all. A portal that reads as
 // unrelated is discarded rather than merged, because importing a stranger's
 // deadline is worse than having none.
-func followPortal(ctx context.Context, client *fetch.Client, s *model.Settlement, portal string) bool {
+func followPortal(ctx context.Context, client *fetch.Client, router *extract.Router,
+	s *model.Settlement, portal string) bool {
+
 	resp, err := client.Get(ctx, portal)
 	if err != nil || !resp.IsHTML() {
 		return false
@@ -131,6 +135,16 @@ func followPortal(ctx context.Context, client *fetch.Client, s *model.Settlement
 		return false
 	}
 	before := s.ClaimDeadline
+
+	// A claim portal exists to state one deadline and one set of amounts. That
+	// is transcription, so it goes to the cheap tier: the class definition has
+	// already been read from the case page, and re-reading it here would be
+	// paying twice for the same paragraph.
+	if router != nil {
+		if p, err := router.For(extract.Cheap).Extract(ctx, portal, s.Title, text); err == nil {
+			mergePortal(s, p)
+		}
+	}
 	extract.Backfill(s, text)
 	if s.ClaimDeadline != before && !s.ClaimDeadline.Zero() {
 		// The administrator is the authority on its own deadline, so a date found
@@ -142,8 +156,43 @@ func followPortal(ctx context.Context, client *fetch.Client, s *model.Settlement
 	return true
 }
 
+// mergePortal takes from an administrator's page only the facts it is the
+// authority on. Its title, summary and class definition are not imported: a
+// portal page often covers several settlements at once, and letting it overwrite
+// the case description would replace something specific with something generic.
+func mergePortal(s, portal *model.Settlement) {
+	if s.ClaimDeadline.Zero() && !portal.ClaimDeadline.Zero() {
+		s.ClaimDeadline = portal.ClaimDeadline
+	}
+	if s.OptOutDeadline.Zero() && !portal.OptOutDeadline.Zero() {
+		s.OptOutDeadline = portal.OptOutDeadline
+	}
+	if s.ClaimsOpenOn.Zero() && !portal.ClaimsOpenOn.Zero() {
+		s.ClaimsOpenOn = portal.ClaimsOpenOn
+	}
+	if s.PayoutLow == 0 && s.PayoutHigh == 0 {
+		s.PayoutLow, s.PayoutHigh = portal.PayoutLow, portal.PayoutHigh
+		s.PayoutNote = portal.PayoutNote
+	}
+	if s.SettlementFund == 0 {
+		s.SettlementFund = portal.SettlementFund
+	}
+	if s.Administrator == "" {
+		s.Administrator = portal.Administrator
+	}
+	if !s.ProofRequired && portal.ProofRequired {
+		s.ProofRequired, s.ProofNote = true, portal.ProofNote
+	}
+	// The administrator is the authority on whether claims are open.
+	if portal.Stage.Actionable() || portal.Stage == model.StageClaimsClose {
+		s.Stage = portal.Stage
+	}
+}
+
 // outcome is one candidate page's contribution to the result.
 type outcome struct {
+	tier       extract.Tier
+	escalated  bool
 	fetched    bool
 	unchanged  bool
 	irrelevant bool
@@ -166,6 +215,12 @@ func merge(res *Result, o outcome) {
 	}
 	if o.extracted {
 		res.Extracted++
+		if o.tier == extract.Prime {
+			res.Prime++
+		}
+		if o.escalated {
+			res.Escalated++
+		}
 	}
 	if o.isNew != nil {
 		res.New = append(res.New, o.isNew)
@@ -178,7 +233,7 @@ func merge(res *Result, o outcome) {
 	}
 }
 
-func visit(ctx context.Context, st *store.Store, client *fetch.Client, ex *extract.Client,
+func visit(ctx context.Context, st *store.Store, client *fetch.Client, router *extract.Router,
 	src *source.Source, cand source.Candidate, opts Options, mu *sync.Mutex) outcome {
 
 	resp, err := client.Get(ctx, cand.URL)
@@ -217,8 +272,25 @@ func visit(ctx context.Context, st *store.Store, client *fetch.Client, ex *extra
 	title = htmlx.CleanTitle(title, cand.URL)
 
 	var s *model.Settlement
-	if ex != nil {
-		s, err = ex.Extract(ctx, cand.URL, title, text)
+	if router != nil {
+		// Spend on the pages where a claim can be filed, be cheap elsewhere. A
+		// proceeding that has only been commenced cannot be claimed from for
+		// years, and its page will have been re-read many times before it can.
+		tier := extract.Stakes(text, src.Kind.Authority() >= source.KindRegistry.Authority())
+		out.tier = tier
+		s, err = router.For(tier).Extract(ctx, cand.URL, title, text)
+
+		// Escalate when the cheap answer is visibly inadequate: a settlement
+		// open for claims today with no class definition extracted is one the
+		// matcher can say nothing useful about, which is the whole job. Paying
+		// twice for those pages is cheaper than routing every page to the
+		// capable model, and it is the failure a single-model run showed the
+		// cheap tier actually producing.
+		if tier == extract.Cheap && err == nil && extract.Underspecified(s) {
+			if better, err2 := router.For(extract.Prime).Extract(ctx, cand.URL, title, text); err2 == nil {
+				s, out.tier, out.escalated = better, extract.Prime, true
+			}
+		}
 		switch {
 		case errors.Is(err, extract.ErrNotClassAction):
 			out.irrelevant = true
@@ -245,7 +317,7 @@ func visit(ctx context.Context, st *store.Store, client *fetch.Client, ex *extra
 	// reason to run this program. One hop, only off-site, only when something is
 	// still missing.
 	if portal := portalFor(s, resp.Body, cand.URL); portal != "" {
-		if enriched := followPortal(ctx, client, s, portal); enriched {
+		if enriched := followPortal(ctx, client, router, s, portal); enriched {
 			s.ClaimURL = portal
 		}
 	}

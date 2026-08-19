@@ -159,13 +159,16 @@ costs.
 Against the current registry, with `google/gemini-3.7-flash`:
 
 ```
-91 candidates, 91 fetched, 47 not relevant, 44 extracted, 44 new, 0 errors in 2m53s
-49 model call(s), 206474 in / 68966 out tokens, $0.2067
+91 candidates, 91 fetched, 46 not relevant, 45 extracted (28 prime, 0 escalated), 45 new, 0 errors in 2m24s
+59 model call(s), 187263 in / 71017 out tokens, $0.1448 (gemini-2.5-flash-lite / gemini-3.7-flash)
 ```
 
-Forty-four records, forty-one distinct proceedings once duplicates are merged,
-for twenty-one cents. A second scan the next day re-reads none of the unchanged
+Forty-five records, forty-one distinct proceedings once duplicates are merged,
+for fourteen cents. A second scan the next day re-reads none of the unchanged
 pages and costs almost nothing.
+
+Two model tiers, because reading a deadline is transcription and decomposing a
+class definition is not. See [docs/models.md](docs/models.md).
 
 ## Sources
 

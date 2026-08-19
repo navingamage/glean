@@ -7,6 +7,58 @@ using. The client is about two hundred lines in
 surface glean needs is one POST, and carrying a vendor SDK for that would be the
 only dependency in the program.
 
+## Two tiers
+
+The pages in a scan are not equally consequential, and their failure modes are
+not equally expensive.
+
+Reading a deadline off a notice is transcription. A small model does it as well
+as a large one, and when it fails the date is visibly absent rather than quietly
+wrong. Decomposing a class definition is not transcription: a model that reads
+"purchased bread at Loblaws, No Frills or Zehrs" as three requirements rather
+than three alternatives produces a settlement the reader is confidently told
+they do not qualify for, and nobody ever finds out.
+
+So there are two:
+
+| tier | default | used for |
+| --- | --- | --- |
+| cheap | `google/gemini-2.5-flash-lite` | proceedings nobody can claim from yet, and the second-hop claim portals that exist to state one deadline |
+| prime | `google/gemini-3.7-flash` | pages where a claim can be filed today, and anything from an administrator or court registry |
+
+A page goes to the prime tier if it carries at least two phrases that only
+appear once a claims process is live, or if it came from an authoritative
+source. One passing mention of a claim form on a firm's practice page is not
+enough. The cheap tier is also sent less of each page: input tokens dominate the
+bill, and the fields it is asked for are stated near the top of a notice or not
+at all.
+
+### Escalation
+
+A cheap extraction that comes back open for claims with no class definition at
+all is redone by the prime model. The matcher can say nothing useful about such
+a record, which is the whole job, so paying twice for those few pages is better
+than routing every page to the capable model. Settlements that merely have not
+been certified yet are allowed to stay vague: their pages will be re-read many
+times before anyone can claim from them.
+
+### Measured
+
+Against the same 91 candidate pages, single model versus tiered:
+
+| | single | tiered |
+| --- | ---: | ---: |
+| cost | $0.2067 | $0.1448 |
+| model calls | 49 | 59 |
+| deadlines found | 24 | 27 |
+| claim portals found | 15 | 16 |
+| criteria extracted | 131 | 139 |
+
+Cheaper and slightly better, and the extra calls are the claim portals, which
+previously got regular expressions only. The first version of the tiering had no
+escalation and dropped the class definition entirely on two claimable
+settlements; that measurement is why the escalation exists.
+
 ## Choosing one
 
 ```bash

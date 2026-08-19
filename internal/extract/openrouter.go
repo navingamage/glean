@@ -118,7 +118,10 @@ type Client struct {
 	Title   string
 
 	MaxTokens int
-	Usage     *Usage
+	// MaxChars bounds how much of a page is sent. The cheap tier sets it lower,
+	// because input tokens dominate the bill.
+	MaxChars int
+	Usage    *Usage
 }
 
 // NewClient builds an extractor. An empty key falls back to OPENROUTER_API_KEY.
@@ -144,6 +147,7 @@ func NewClient(apiKey, modelID string) (*Client, error) {
 		Referer:   "https://github.com/navingamage/glean",
 		Title:     "glean",
 		MaxTokens: 8000,
+		MaxChars:  maxChars,
 		Usage:     &Usage{},
 	}, nil
 }
@@ -198,8 +202,12 @@ type chatResponse struct {
 
 // Extract reads one page into a settlement record.
 func (c *Client) Extract(ctx context.Context, pageURL, title, text string) (*model.Settlement, error) {
-	if len(text) > maxChars {
-		text = text[:maxChars]
+	limit := c.MaxChars
+	if limit <= 0 {
+		limit = maxChars
+	}
+	if len(text) > limit {
+		text = text[:limit]
 	}
 	user := fmt.Sprintf("URL: %s\nPage title: %s\n\n---\n%s", pageURL, title, text)
 

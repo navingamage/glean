@@ -48,18 +48,24 @@ Flags:
 `
 
 type globalFlags struct {
-	dir      string
-	registry string
-	model    string
-	noLLM    bool
-	verbose  bool
+	dir        string
+	registry   string
+	model      string
+	cheapModel string
+	primeModel string
+	noLLM      bool
+	verbose    bool
 }
 
 func main() {
 	var g globalFlags
 	flag.StringVar(&g.dir, "dir", "", "state directory (default $GLEAN_HOME or ~/.local/share/glean)")
 	flag.StringVar(&g.registry, "sources", "", "path to a sources.json replacing the built-in registry")
-	flag.StringVar(&g.model, "model", envOr("GLEAN_MODEL", extract.DefaultModel), "extraction model, as an OpenRouter id")
+	flag.StringVar(&g.model, "model", os.Getenv("GLEAN_MODEL"), "pin both tiers to one OpenRouter model")
+	flag.StringVar(&g.cheapModel, "model-cheap", envOr("GLEAN_MODEL_CHEAP", extract.DefaultCheapModel),
+		"model for transcription: deadlines, amounts, claim portals")
+	flag.StringVar(&g.primeModel, "model-prime", envOr("GLEAN_MODEL_PRIME", extract.DefaultPrimeModel),
+		"model for class definitions on settlements you can claim from today")
 	flag.BoolVar(&g.noLLM, "no-llm", false, "extract with regular expressions only, never call a model")
 	flag.BoolVar(&g.verbose, "v", false, "log each page as it is visited")
 	flag.Usage = func() {
@@ -137,18 +143,22 @@ func run(ctx context.Context, g globalFlags, args []string) error {
 	}
 }
 
-// extractor builds the model-backed extractor, or returns nil when there is no
-// key or the user asked for regular expressions only. A nil extractor is a
-// supported mode, not an error: glean still tracks deadlines.
-func extractor(g globalFlags) (*extract.Client, string) {
+// extractor builds the tiered extractor, or returns nil when there is no key or
+// the user asked for regular expressions only. A nil router is a supported mode,
+// not an error: glean still tracks deadlines.
+func extractor(g globalFlags) (*extract.Router, string) {
 	if g.noLLM {
 		return nil, "extraction: regular expressions only (-no-llm)"
 	}
-	ex, err := extract.NewClient("", g.model)
+	cheap, prime := g.cheapModel, g.primeModel
+	if g.model != "" {
+		cheap, prime = g.model, g.model // -model pins both tiers
+	}
+	r, err := extract.NewRouter("", cheap, prime)
 	if err != nil {
 		return nil, "extraction: regular expressions only (no OPENROUTER_API_KEY; class definitions will not be read)"
 	}
-	return ex, "extraction: " + ex.Model
+	return r, "extraction: " + r.String()
 }
 
 func envOr(key, fallback string) string {

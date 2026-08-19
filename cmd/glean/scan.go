@@ -63,7 +63,7 @@ func cmdScan(ctx context.Context, g globalFlags, st *store.Store, args []string)
 	}
 	fmt.Printf("%s in %s\n", res, time.Since(started).Round(time.Second))
 	if ex != nil {
-		fmt.Printf("%s (%s)\n", ex.Usage, ex.Model)
+		fmt.Printf("%s (%s)\n", ex.Usage(), ex)
 	}
 
 	for _, err := range res.Errors {
