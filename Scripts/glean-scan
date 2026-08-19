@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+#
+# One scheduled scan. This is what the LaunchAgent runs.
+#
+# launchd does not read a login shell's profile, so the OpenRouter key has to be
+# fetched here rather than inherited. It comes from the Keychain by way of the
+# shared loader, which means the key is never written into this file, into the
+# plist, or into any environment that outlives the scan.
+set -euo pipefail
+
+GLEAN="${GLEAN_BIN:-$HOME/Desktop/code/Workspace/glean/bin/glean}"
+SECRETS="$HOME/.config/antipode/load-secrets.sh"
+
+if [ -r "$SECRETS" ]; then
+  # shellcheck disable=SC1090
+  source "$SECRETS" >/dev/null 2>&1 || true
+fi
+
+if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+  # Worth saying out loud rather than silently degrading: without a key the scan
+  # still tracks deadlines, but it cannot read a class definition, so every
+  # settlement comes back as "eligibility unknown".
+  echo "glean: no OPENROUTER_API_KEY; scanning without class definitions" >&2
+fi
+
+# Breadth is configurable because the first run and every run after it have very
+# different shapes. A cold store fetches and extracts everything it finds, which
+# on the full registry is a few hundred pages and a few tens of cents. After
+# that, a page whose readable text has not moved is never sent to a model, so
+# the same breadth costs almost nothing and the coverage is worth having.
+#
+# Override for a smaller or larger sweep:
+#   GLEAN_SCAN_ARGS="-per-source 10" Scripts/glean-scan
+SCAN_ARGS="${GLEAN_SCAN_ARGS:--per-source 40}"
+
+echo "--- $(date '+%Y-%m-%d %H:%M:%S') ---"
+# shellcheck disable=SC2086
+exec "$GLEAN" scan -notify $SCAN_ARGS

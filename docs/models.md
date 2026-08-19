@@ -77,14 +77,25 @@ to read once the markup is stripped.
 The headline result is that it does not matter much. A full first scan of the
 whole registry lands between two and twenty cents depending on the model.
 
-A steady-state daily run should cost far less, because only pages whose readable
-text changed since the last pass are sent to a model at all. That qualifier is
-load-bearing and was wrong at first: the comparison originally ran on the raw
-bytes of the response, and sites emit a rotating CSRF token, session id or ad
-slot on every request, so a scan of a one-day-old store re-extracted 77 of 91
-pages and cost as much as the cold start. Stripping the markup first costs
-microseconds and no money, and is the only comparison that answers the question
-being asked, which is whether a re-extraction could learn anything new.
+A steady-state run costs nothing, because only pages whose readable text changed
+since the last pass are sent to a model at all. Over ten unchanged pages: ten
+fetches, zero model calls, ten seconds.
+
+That qualifier is load-bearing and took three attempts to get right, each
+failure visible only in the bill.
+
+Comparing the raw bytes of the response does not work: sites emit a rotating
+CSRF token, session id or ad slot on every request, so a scan of a one-day-old
+store re-extracted 77 of 91 pages. Comparing the extracted text is the right
+question, since stripping the markup costs microseconds and no money and is the
+only thing a re-extraction could learn from. But storing that hash on the
+settlement record does not work either, because the store deliberately writes no
+event when a re-extraction changes nothing, so the new hash was discarded in
+precisely the case it mattered and a stable page was re-read at full price every
+night.
+
+The hashes are now their own file next to the event log, written whenever a page
+is read, including when reading it changed nothing.
 
 So choose on accuracy. The failure that costs money here is a model that reads
 "purchased bread at Loblaws, No Frills or Zehrs" as three separate requirements
@@ -130,10 +141,10 @@ lands in shell history.
 
 ## Upgrading an existing store
 
-Records written before the text-hash change carry a byte hash in the same field,
-so the first scan after upgrading finds nothing matching and re-extracts
-everything once, at roughly the cost of a cold start. Every scan after that
-settles down. There is no migration to run; it is one scan.
+There is no hash index before this change, so the first scan after upgrading
+re-extracts everything once, at roughly the cost of a cold start, and writes the
+index as it goes. Every scan after that settles down. There is no migration to
+run; it is one scan.
 
 ## Cost reporting
 

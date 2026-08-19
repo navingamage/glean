@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  A daily scan, run by launchd.
+
+  Install:
+    cp Scripts/com.antipodetech.glean.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.antipodetech.glean.plist
+
+  Remove:
+    launchctl unload ~/Library/LaunchAgents/com.antipodetech.glean.plist
+
+  StartCalendarInterval rather than StartInterval, because these sites publish on
+  business days and a fixed hour makes the log readable. RunAtLoad is false: a
+  scan on every login would spend money on a machine that reboots often, and the
+  whole design assumes the previous day's answers are still good.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.antipodetech.glean</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>REPLACE_WITH_PATH_TO/glean/Scripts/glean-scan</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key><integer>8</integer>
+    <key>Minute</key><integer>30</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <!-- If the Mac was asleep at 08:30, run once it wakes rather than skipping. -->
+  <key>StartOnMount</key>
+  <false/>
+
+  <key>StandardOutPath</key>
+  <string>/tmp/glean-scan.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/glean-scan.log</string>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

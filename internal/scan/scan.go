@@ -106,6 +106,9 @@ func Run(ctx context.Context, st *store.Store, sources []*source.Source, router 
 		}(src)
 	}
 	wg.Wait()
+	if err := st.SaveHashes(); err != nil {
+		res.Errors = append(res.Errors, err)
+	}
 	return res
 }
 
@@ -267,10 +270,12 @@ func visit(ctx context.Context, st *store.Store, client *fetch.Client, router *e
 	sum := sha256.Sum256([]byte(text))
 	textHash := hex.EncodeToString(sum[:])
 
+	id := model.NewID(cand.URL)
 	mu.Lock()
-	prev := st.Settlement(model.NewID(cand.URL))
+	known := st.Settlement(id) != nil
+	seen := st.SeenHash(id)
 	mu.Unlock()
-	if prev != nil && prev.ContentHash == textHash && !opts.Refetch {
+	if known && seen == textHash && !opts.Refetch {
 		out.unchanged = true
 		return out
 	}
@@ -346,6 +351,11 @@ func visit(ctx context.Context, st *store.Store, client *fetch.Client, router *e
 
 	mu.Lock()
 	isNew, changes, err := st.Upsert(s)
+	// Recorded whether or not the extraction changed anything. "We read this
+	// page and it said the same as last time" is the fact that makes tomorrow's
+	// scan free, and it is exactly the case Upsert declines to write an event
+	// for.
+	st.RecordHash(s.ID, textHash)
 	mu.Unlock()
 	if err != nil {
 		out.err = err

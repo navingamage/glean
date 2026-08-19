@@ -162,3 +162,86 @@ func TestProfileWriteIsAtomic(t *testing.T) {
 		t.Error("profile written empty")
 	}
 }
+
+func TestContentHashSurvivesAnUneventfulReExtraction(t *testing.T) {
+	// The regression this exists for: a page whose deadline and stage have not
+	// moved produces no event, so the first implementation dropped the new
+	// content hash on the floor and re-extracted that page at full price on
+	// every scan, forever. The hash index is written separately for exactly this.
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.Upsert(settlement("a", "2026-10-15", model.StageClaimsOpen)); err != nil {
+		t.Fatal(err)
+	}
+	st.RecordHash("a", "hash-v1")
+	if err := st.SaveHashes(); err != nil {
+		t.Fatal(err)
+	}
+
+	// A second sighting that changes nothing worth an event.
+	_, changes, err := st.Upsert(settlement("a", "2026-10-15", model.StageClaimsOpen))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 0 {
+		t.Fatalf("expected an uneventful re-extraction, got %v", changes)
+	}
+	st.RecordHash("a", "hash-v2")
+	if err := st.SaveHashes(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reopened.SeenHash("a"); got != "hash-v2" {
+		t.Errorf("hash after reopen = %q, want hash-v2", got)
+	}
+}
+
+func TestSaveHashesIsAtomicAndSkipsWhenClean(t *testing.T) {
+	dir := t.TempDir()
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Nothing recorded: no file, and no error.
+	if err := st.SaveHashes(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "hashes.json")); !os.IsNotExist(err) {
+		t.Error("wrote an index with nothing in it")
+	}
+
+	st.RecordHash("a", "h")
+	if err := st.SaveHashes(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "hashes.json.tmp")); !os.IsNotExist(err) {
+		t.Error("left the temporary file behind")
+	}
+	if got := st.SeenHash("a"); got != "h" {
+		t.Errorf("SeenHash = %q", got)
+	}
+	if got := st.SeenHash("missing"); got != "" {
+		t.Errorf("SeenHash for an unknown id = %q, want empty", got)
+	}
+}
+
+func TestCorruptHashIndexCostsMoneyNotCorrectness(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "hashes.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatalf("a corrupt index made the store unopenable: %v", err)
+	}
+	if got := st.SeenHash("a"); got != "" {
+		t.Errorf("SeenHash = %q, want empty so the page is re-read", got)
+	}
+}

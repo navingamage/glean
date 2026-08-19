@@ -1,0 +1,13 @@
+{
+  "desktop": true,
+
+  "webhook": "https://ntfy.sh/replace-with-a-long-random-topic-name",
+
+  "email": {
+    "to": "",
+    "from": "",
+    "host": "smtp.example.com:587",
+    "username": "",
+    "password": ""
+  }
+}

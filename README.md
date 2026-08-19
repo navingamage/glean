@@ -152,7 +152,8 @@ it. One hop, off-site only, and only when something is still missing. In a scan
 of the current registry this is the difference between one deadline and nine.
 
 See [docs/models.md](docs/models.md) for how the model is chosen and what it
-costs.
+costs, and [docs/running.md](docs/running.md) for putting it on a schedule and
+getting the reminders onto a phone.
 
 ### What a real scan looks like
 
@@ -166,13 +167,21 @@ Against the current registry, with `google/gemini-3.7-flash`:
 Forty-five records, forty-one distinct proceedings once duplicates are merged,
 for fourteen cents.
 
-A second scan the next day should cost close to nothing, because a page whose
-text has not changed is never sent to a model. Getting that right took two
-attempts: the first version compared the raw bytes of a response, and since
-sites emit a fresh CSRF token, session id or ad slot every time, 77 of 91 pages
-looked changed overnight and a daily scan cost as much as a cold start. The
-comparison is now on the readable text, which is free to compute and is the only
-thing a re-extraction could learn anything from.
+A second scan over the same pages costs nothing at all:
+
+```
+10 candidates, 10 fetched, 10 unchanged, 0 extracted, 0 errors in 10s
+no model calls
+```
+
+Getting there took three attempts, and each failure was invisible except in the
+bill. The first compared the raw bytes of a response, and since sites emit a
+fresh CSRF token or ad slot every time, 77 of 91 pages looked changed overnight.
+The second compared the extracted text, which is the right comparison, but
+stored the hash on the settlement record, and the store deliberately writes
+nothing when a re-extraction produces no change, so the new hash was dropped
+exactly in the case it was needed. The hash index is now its own file, written
+whenever a page is read, including when reading it changed nothing.
 
 Two model tiers, because reading a deadline is transcription and decomposing a
 class definition is not. See [docs/models.md](docs/models.md).

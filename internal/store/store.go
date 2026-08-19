@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/navingamage/glean/internal/dedupe"
@@ -62,6 +63,23 @@ type Store struct {
 	settlements map[string]*model.Settlement
 	claims      map[string]*model.Claim
 	events      []Event
+
+	// hashes maps a settlement id to the hash of the page text it was last
+	// extracted from. It is kept apart from the event log on purpose.
+	//
+	// The log is history: what was discovered, what moved, what was answered.
+	// A content hash is none of those. Putting it in the log would mean writing
+	// an event for every page on every scan just to say nothing had changed,
+	// which both bloats the file and drowns the signal it exists to carry.
+	//
+	// It cannot live on the settlement record either, which is what the first
+	// version tried. Upsert deliberately writes nothing when a re-extraction
+	// produces no change in any watched field, so the new hash was discarded
+	// exactly in the case it was needed, and a stable page was re-extracted at
+	// full price on every scan forever.
+	hashMu  sync.Mutex
+	hashes  map[string]string
+	hashDir bool // hashes changed since they were last written
 }
 
 // DefaultDir is where glean keeps its state when nothing says otherwise.
@@ -86,6 +104,7 @@ func Open(dir string) (*Store, error) {
 		Dir:         dir,
 		settlements: map[string]*model.Settlement{},
 		claims:      map[string]*model.Claim{},
+		hashes:      map[string]string{},
 	}
 	if err := s.replay(); err != nil {
 		return nil, err
@@ -96,7 +115,67 @@ func Open(dir string) (*Store, error) {
 	if all, err := source.Load(""); err == nil {
 		s.sources = all
 	}
+	s.loadHashes()
 	return s, nil
+}
+
+func (s *Store) hashPath() string { return filepath.Join(s.Dir, "hashes.json") }
+
+func (s *Store) loadHashes() {
+	b, err := os.ReadFile(s.hashPath())
+	if err != nil {
+		return
+	}
+	var m map[string]string
+	if err := json.Unmarshal(b, &m); err != nil {
+		return // a corrupt index costs one expensive scan, not correctness
+	}
+	s.hashes = m
+}
+
+// SeenHash returns the page-text hash a settlement was last extracted from.
+func (s *Store) SeenHash(id string) string {
+	s.hashMu.Lock()
+	defer s.hashMu.Unlock()
+	return s.hashes[id]
+}
+
+// RecordHash notes the text a settlement was extracted from. Call it whenever a
+// page is successfully read, including when the extraction changed nothing:
+// "we looked and it was the same" is precisely the fact worth remembering.
+func (s *Store) RecordHash(id, hash string) {
+	if id == "" || hash == "" {
+		return
+	}
+	s.hashMu.Lock()
+	defer s.hashMu.Unlock()
+	if s.hashes[id] != hash {
+		s.hashes[id] = hash
+		s.hashDir = true
+	}
+}
+
+// SaveHashes writes the index if anything changed. Written through a temporary
+// file, because a truncated index would silently cost a full re-extraction.
+func (s *Store) SaveHashes() error {
+	s.hashMu.Lock()
+	defer s.hashMu.Unlock()
+	if !s.hashDir {
+		return nil
+	}
+	b, err := json.Marshal(s.hashes)
+	if err != nil {
+		return fmt.Errorf("store: %w", err)
+	}
+	tmp := s.hashPath() + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return fmt.Errorf("store: %w", err)
+	}
+	if err := os.Rename(tmp, s.hashPath()); err != nil {
+		return fmt.Errorf("store: %w", err)
+	}
+	s.hashDir = false
+	return nil
 }
 
 // SetSources replaces the registry used for deduplication, so that a custom
