@@ -452,5 +452,42 @@ func Questions(as []Assessment) []Question {
 		}
 		return out[i].ID < out[j].ID
 	})
+	return capPerSettlement(out)
+}
+
+// perSettlementCap bounds how many of one settlement's questions reach the
+// interview at a time.
+//
+// An alternative group with nine branches produces nine questions, all worth
+// the same, all about one case. The major junior hockey class does exactly
+// this: one question per league per province. Left alone they fill the entire
+// queue and bury every other settlement in the store behind a case the reader
+// has probably never been anywhere near.
+//
+// Holding the rest back costs nothing, because answering no to the first few
+// leaves the group unresolved and the next few come forward on the following
+// pass. `glean show` lists all of a settlement's open questions, and `glean
+// answer` will take any of them at any time.
+const perSettlementCap = 3
+
+func capPerSettlement(qs []Question) []Question {
+	seen := map[string]int{}
+	out := qs[:0:0]
+	for _, q := range qs {
+		room := true
+		for _, id := range q.Unlocks {
+			if seen[id] >= perSettlementCap {
+				room = false
+				break
+			}
+		}
+		if !room {
+			continue
+		}
+		for _, id := range q.Unlocks {
+			seen[id]++
+		}
+		out = append(out, q)
+	}
 	return out
 }

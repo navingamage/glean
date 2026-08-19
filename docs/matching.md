@@ -153,5 +153,14 @@ let a summary line add ninety-six questions into half a million dollars nobody
 is owed, which is what the first version of this did. The total shown counts
 each settlement once however many of its criteria are open.
 
+At most three of any one settlement's questions reach the interview at a time.
+An alternative group with nine branches produces nine questions of identical
+value about a single case; the major junior hockey class does exactly this, one
+per league per province, and unbounded they fill the whole queue and bury every
+other settlement behind a case the reader has probably never been near. Holding
+the rest back costs nothing: answering no to the first few leaves the group
+unresolved and the next few come forward, while `glean show` lists all of a
+settlement's open questions and `glean answer` takes any of them at any time.
+
 Skipping is a real answer to "I do not remember", and is recorded as neither yes
 nor no. Recording a skip as a no would be a lie that costs money later.

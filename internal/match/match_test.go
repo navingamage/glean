@@ -305,3 +305,37 @@ func TestUnpricedSettlementsRankByProbability(t *testing.T) {
 		}
 	}
 }
+
+func TestOneSettlementCannotMonopoliseTheQueue(t *testing.T) {
+	// The major junior hockey class is defined as one alternative per league per
+	// province, which is nine questions of identical value about a single case.
+	// Unbounded, they fill the whole interview.
+	var criteria []model.Criterion
+	for _, league := range []string{"ohl-on", "qmjhl-nb", "qmjhl-ns", "qmjhl-pe", "qmjhl-qc", "whl-ab", "whl-bc", "whl-sk", "whl-mb"} {
+		criteria = append(criteria, model.Criterion{
+			Kind: model.KindEmployment, Entity: league, Label: league,
+			Group: "league", Prevalence: 0.001,
+		})
+	}
+	hockey := &model.Settlement{ID: "hockey", Stage: model.StageClaimsOpen,
+		PayoutLow: 9000, PayoutHigh: 9000, Criteria: criteria}
+	bread := &model.Settlement{ID: "bread", Stage: model.StageClaimsOpen,
+		PayoutLow: 25, PayoutHigh: 25,
+		Criteria: []model.Criterion{{Kind: model.KindPurchase, Entity: "loblaw", Label: "Loblaws", Prevalence: 0.8}}}
+
+	p := model.DefaultProfile()
+	qs := Questions([]Assessment{Assess(hockey, p), Assess(bread, p)})
+
+	byID := map[string]int{}
+	for _, q := range qs {
+		for _, id := range q.Unlocks {
+			byID[id]++
+		}
+	}
+	if byID["hockey"] > perSettlementCap {
+		t.Errorf("one settlement contributed %d questions, cap is %d", byID["hockey"], perSettlementCap)
+	}
+	if byID["bread"] == 0 {
+		t.Error("the other settlement was crowded out of the queue entirely")
+	}
+}
