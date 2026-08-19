@@ -6,7 +6,7 @@
 <h2>Answer these first</h2>
 {{range .Questions}}
 <div class="q">
-  <div>{{.Ask}}<div class="meta"><span>unlocks about ${{printf "%.0f" .Worth}} across {{len .Unlocks}} settlement{{if ne (len .Unlocks) 1}}s{{end}}</span></div></div>
+  <div>{{.Ask}}<div class="meta"><span>{{if gt .Worth 0.0}}unlocks about ${{printf "%.0f" .Worth}} across{{else}}settles{{end}} {{len .Unlocks}} settlement{{if ne (len .Unlocks) 1}}s{{end}}</span></div></div>
   <div>
     <form class="inline" method="post" action="/answer"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="label" value="{{.Label}}"><input type="hidden" name="a" value="yes"><button class="primary">Yes</button></form>
     <form class="inline" method="post" action="/answer"><input type="hidden" name="id" value="{{.ID}}"><input type="hidden" name="label" value="{{.Label}}"><input type="hidden" name="a" value="no"><button>No</button></form>

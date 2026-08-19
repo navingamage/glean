@@ -73,7 +73,8 @@ func build(st *store.Store, newIDs map[string]bool, changed map[string][]store.C
 	byID := st.ByID()
 
 	var all []match.Assessment
-	for _, s := range st.Settlements() {
+	primaries, _ := st.Primaries()
+	for _, s := range primaries {
 		a := match.Assess(s, profile)
 		all = append(all, a)
 
@@ -207,8 +208,7 @@ func (d *Digest) Text() string {
 		fmt.Fprintf(&b, "Answer these\n------------\n")
 		for _, q := range d.Questions {
 			fmt.Fprintf(&b, "  %s\n", q.Ask)
-			fmt.Fprintf(&b, "    unlocks about $%.0f across %d settlement(s)  [glean answer %s yes]\n",
-				q.Worth, len(q.Unlocks), q.ID)
+			fmt.Fprintf(&b, "    %s  [glean answer %s yes]\n", worthOf(q), q.ID)
 		}
 	}
 	return strings.TrimRight(b.String(), "\n") + "\n"
@@ -226,6 +226,21 @@ func (d *Digest) Subject() string {
 	default:
 		return "glean: nothing new"
 	}
+}
+
+// worthOf describes what answering a question buys. Saying "unlocks about $0"
+// is worse than saying nothing: it reads as a payout of zero rather than as a
+// payout the notice never stated.
+func worthOf(q match.Question) string {
+	n := len(q.Unlocks)
+	plural := "s"
+	if n == 1 {
+		plural = ""
+	}
+	if q.Worth <= 0 {
+		return fmt.Sprintf("settles %d settlement%s, none of which states a payout", n, plural)
+	}
+	return fmt.Sprintf("unlocks about $%.0f across %d settlement%s", q.Worth, n, plural)
 }
 
 func orUnset(s string) string {

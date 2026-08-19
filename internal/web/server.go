@@ -86,9 +86,11 @@ type claimRow struct {
 }
 
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
-	byID := s.store.ByID()
+	primaries, canonical := s.store.Primaries()
+	byID := map[string]*model.Settlement{}
 	var as []match.Assessment
-	for _, st := range s.store.Settlements() {
+	for _, st := range primaries {
+		byID[st.ID] = st
 		as = append(as, match.Assess(st, s.store.Profile))
 	}
 	match.Rank(as, byID)
@@ -114,7 +116,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 
 	var claims []claimRow
 	for _, c := range s.store.Claims() {
-		st := byID[c.SettlementID]
+		st := byID[canonical[c.SettlementID]]
 		if st == nil || c.State == model.StateNew {
 			continue
 		}
@@ -137,11 +139,11 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		Questions: questions,
 		All:       rows,
 		Claims:    claims,
-		Headline:  headline(d, questions),
+		Headline:  headline(d, questions, match.TotalAtStake(questions, byID, as)),
 	})
 }
 
-func headline(d *notify.Digest, qs []match.Question) string {
+func headline(d *notify.Digest, qs []match.Question, atStake float64) string {
 	var parts []string
 	if n := len(d.Closing); n > 0 {
 		parts = append(parts, fmt.Sprintf("%d closing soon", n))
@@ -150,11 +152,7 @@ func headline(d *notify.Digest, qs []match.Question) string {
 		parts = append(parts, fmt.Sprintf("%d possible", n))
 	}
 	if len(qs) > 0 {
-		var worth float64
-		for _, q := range qs {
-			worth += q.Worth
-		}
-		parts = append(parts, fmt.Sprintf("%d questions worth about $%.0f", len(qs), worth))
+		parts = append(parts, fmt.Sprintf("%d questions worth about $%.0f", len(qs), atStake))
 	}
 	if len(parts) == 0 {
 		return "Nothing needs you. Run a scan to look again."

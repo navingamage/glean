@@ -52,14 +52,6 @@ func deadline(s *model.Settlement) string {
 	}
 }
 
-func totalWorth(qs []match.Question) float64 {
-	var sum float64
-	for _, q := range qs {
-		sum += q.Worth
-	}
-	return sum
-}
-
 func provinceList(rs []model.Residence) string {
 	if len(rs) == 0 {
 		return "(nowhere on file)"

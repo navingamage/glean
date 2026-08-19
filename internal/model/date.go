@@ -112,6 +112,24 @@ func (w Window) String() string {
 	return w.From.String() + " to " + w.Until.String()
 }
 
+// Phrase renders the window as a clause that can be dropped into a question.
+//
+// String is for tables, where "2001-01-01 to 2021-12-31" is what you want.
+// Questions are read aloud in someone's head, and gluing String onto "between"
+// produces "between up to 2012-03-12", which is the kind of thing that makes a
+// person distrust everything else on the screen.
+func (w Window) Phrase() string {
+	switch {
+	case w.Zero():
+		return ""
+	case w.From.Zero():
+		return "on or before " + w.Until.String()
+	case w.Until.Zero():
+		return "at any time since " + w.From.String()
+	}
+	return "between " + w.From.String() + " and " + w.Until.String()
+}
+
 // Contains reports whether d falls inside the window, inclusive at both ends.
 func (w Window) Contains(d Date) bool {
 	if d.Zero() {

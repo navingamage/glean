@@ -22,9 +22,11 @@ func cmdList(g globalFlags, st *store.Store, args []string) error {
 		return err
 	}
 
-	byID := st.ByID()
+	primaries, _ := st.Primaries()
+	byID := map[string]*model.Settlement{}
 	var as []match.Assessment
-	for _, s := range st.Settlements() {
+	for _, s := range primaries {
+		byID[s.ID] = s
 		as = append(as, match.Assess(s, st.Profile))
 	}
 	match.Rank(as, byID)
@@ -59,8 +61,8 @@ func cmdList(g globalFlags, st *store.Store, args []string) error {
 	}
 
 	if qs := match.Questions(as); len(qs) > 0 {
-		fmt.Printf("\n%d open question(s) worth about $%.0f. Run `glean ask`.\n",
-			len(qs), totalWorth(qs))
+		fmt.Printf("\n%d open question(s) standing between you and about $%.0f of expected value. Run `glean ask`.\n",
+			len(qs), match.TotalAtStake(qs, byID, as))
 	}
 	return nil
 }
@@ -152,8 +154,11 @@ func cmdAsk(g globalFlags, st *store.Store, args []string) error {
 		return err
 	}
 
+	primaries, _ := st.Primaries()
+	byID := map[string]*model.Settlement{}
 	var as []match.Assessment
-	for _, s := range st.Settlements() {
+	for _, s := range primaries {
+		byID[s.ID] = s
 		as = append(as, match.Assess(s, st.Profile))
 	}
 	qs := match.Questions(as)
@@ -181,13 +186,17 @@ func cmdAsk(g globalFlags, st *store.Store, args []string) error {
 		qs = qs[:*limit]
 	}
 
-	fmt.Printf("%d question(s), highest value first. y / n / s to skip / q to stop.\n\n", len(qs))
+	fmt.Printf("%d question(s), about $%.0f of expected value behind them. y / n / s to skip / q to stop.\n\n",
+		len(qs), match.TotalAtStake(qs, byID, as))
 	in := bufio.NewScanner(os.Stdin)
 	answered := 0
 
 	for _, q := range qs {
-		fmt.Printf("%s\n  (worth about $%.0f across %d settlement(s)) [y/n/s/q] ",
-			q.Ask, q.Worth, len(q.Unlocks))
+		worth := fmt.Sprintf("worth about $%.0f across %d", q.Worth, len(q.Unlocks))
+		if q.Worth <= 0 {
+			worth = fmt.Sprintf("settles %d", len(q.Unlocks))
+		}
+		fmt.Printf("%s\n  (%s settlement(s)) [y/n/s/q] ", q.Ask, worth)
 		if !in.Scan() {
 			break
 		}

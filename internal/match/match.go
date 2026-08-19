@@ -181,7 +181,13 @@ func Assess(s *model.Settlement, p *model.Profile) Assessment {
 
 	for i := range a.Questions {
 		a.Questions[i].Unlocks = []string{s.ID}
-		a.Questions[i].Worth = a.Payout
+		// Worth is the probability-weighted value of the settlement this
+		// question is blocking, not its headline payout. Using the payout would
+		// price a question about a rare drug class at its full $17,500 and put
+		// it above a question about a grocery chain half the country shops at,
+		// which is exactly backwards, and would let a summary line add up
+		// ninety-six questions into half a million dollars nobody is owed.
+		a.Questions[i].Worth = a.ExpectedValue
 	}
 	return a
 }
@@ -256,8 +262,8 @@ func questionFor(c model.Criterion) Question {
 		Window: c.Window,
 	}
 	period := ""
-	if !c.Window.Zero() {
-		period = " between " + c.Window.String()
+	if p := c.Window.Phrase(); p != "" {
+		period = " " + p
 	}
 	switch c.Kind {
 	case model.KindResidency:
@@ -353,9 +359,18 @@ func score(a Assessment, s *model.Settlement) float64 {
 	}
 	v := a.ExpectedValue
 	if v == 0 {
-		// An unpriced settlement still deserves a place in the list, below
-		// anything with a real number on it but above the ruled-out.
-		v = 0.01
+		// Most notices state no per-claimant figure, so a great many settlements
+		// are unpriced. Giving them all one constant would sort a class you are
+		// almost certainly in level with one you are almost certainly not, which
+		// throws away the only thing actually known about them. So they are
+		// ranked against a nominal small consumer payout instead.
+		//
+		// This proxy exists only here. It never reaches Payout or ExpectedValue,
+		// and the list still shows "?" for what such a settlement is worth,
+		// because inventing a number for the user to read would be a different
+		// and much worse thing than using one to break a tie.
+		const unpricedProxy = 20
+		v = 0.01 + a.Probability*unpricedProxy
 	}
 	if !a.Actionable {
 		v *= 0.25 // not yet claimable: worth watching, not worth an evening
@@ -369,6 +384,30 @@ func score(a Assessment, s *model.Settlement) float64 {
 		v *= 1.15
 	}
 	return v
+}
+
+// TotalAtStake is the expected value sitting behind unanswered questions,
+// counted once per settlement.
+//
+// Summing Question.Worth would double count, because one settlement with three
+// open criteria contributes three questions each carrying that settlement's
+// value. The number a person reads has to be the money, not the arithmetic.
+func TotalAtStake(qs []Question, byID map[string]*model.Settlement, as []Assessment) float64 {
+	value := make(map[string]float64, len(as))
+	for _, a := range as {
+		value[a.SettlementID] = a.ExpectedValue
+	}
+	counted := map[string]bool{}
+	var sum float64
+	for _, q := range qs {
+		for _, id := range q.Unlocks {
+			if !counted[id] {
+				counted[id] = true
+				sum += value[id]
+			}
+		}
+	}
+	return sum
 }
 
 // Questions aggregates the open questions across many assessments, merging by
@@ -404,6 +443,12 @@ func Questions(as []Assessment) []Question {
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Worth != out[j].Worth {
 			return out[i].Worth > out[j].Worth
+		}
+		// Plenty of notices state no payout at all, which leaves a whole tier of
+		// questions worth nothing on paper. Among those, the one blocking the
+		// most settlements is still the one to ask first.
+		if len(out[i].Unlocks) != len(out[j].Unlocks) {
+			return len(out[i].Unlocks) > len(out[j].Unlocks)
 		}
 		return out[i].ID < out[j].ID
 	})

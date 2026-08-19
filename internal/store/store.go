@@ -17,7 +17,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/navingamage/glean/internal/dedupe"
 	"github.com/navingamage/glean/internal/model"
+	"github.com/navingamage/glean/internal/source"
 )
 
 type EventType string
@@ -51,6 +53,11 @@ type Event struct {
 type Store struct {
 	Dir     string
 	Profile *model.Profile
+
+	// sources is the registry, used to weigh which of two records for one
+	// proceeding is the more authoritative. It defaults to the built-in list so
+	// that a Store is usable without one being handed in.
+	sources []*source.Source
 
 	settlements map[string]*model.Settlement
 	claims      map[string]*model.Claim
@@ -86,8 +93,15 @@ func Open(dir string) (*Store, error) {
 	if err := s.loadProfile(); err != nil {
 		return nil, err
 	}
+	if all, err := source.Load(""); err == nil {
+		s.sources = all
+	}
 	return s, nil
 }
+
+// SetSources replaces the registry used for deduplication, so that a custom
+// registry passed with -sources is reflected in which record wins.
+func (s *Store) SetSources(all []*source.Source) { s.sources = all }
 
 func (s *Store) logPath() string     { return filepath.Join(s.Dir, "events.jsonl") }
 func (s *Store) profilePath() string { return filepath.Join(s.Dir, "profile.json") }
@@ -230,6 +244,23 @@ func (s *Store) Settlements() []*model.Settlement {
 }
 
 func (s *Store) Settlement(id string) *model.Settlement { return s.settlements[id] }
+
+// Primaries returns one settlement per proceeding, collapsing records that two
+// or more sources reported separately, plus a lookup from any record's id to
+// the primary that represents it.
+func (s *Store) Primaries() ([]*model.Settlement, map[string]string) {
+	groups := dedupe.Collapse(s.Settlements(), s.sources)
+	out := make([]*model.Settlement, 0, len(groups))
+	canonical := make(map[string]string, len(s.settlements))
+	for _, g := range groups {
+		out = append(out, g.Primary)
+		canonical[g.Primary.ID] = g.Primary.ID
+		for _, dup := range g.Also {
+			canonical[dup.ID] = g.Primary.ID
+		}
+	}
+	return out, canonical
+}
 
 func (s *Store) ByID() map[string]*model.Settlement {
 	out := make(map[string]*model.Settlement, len(s.settlements))

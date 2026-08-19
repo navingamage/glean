@@ -20,6 +20,7 @@ import (
 	"syscall"
 
 	"github.com/navingamage/glean/internal/extract"
+	"github.com/navingamage/glean/internal/source"
 	"github.com/navingamage/glean/internal/store"
 )
 
@@ -96,6 +97,15 @@ func run(ctx context.Context, g globalFlags, args []string) error {
 	st, err := store.Open(g.dir)
 	if err != nil {
 		return err
+	}
+	// The registry decides which of two records for one proceeding is the more
+	// authoritative, so a custom one has to reach the store as well as the scan.
+	if g.registry != "" {
+		all, err := source.Load(g.registry)
+		if err != nil {
+			return err
+		}
+		st.SetSources(all)
 	}
 
 	switch cmd {

@@ -134,6 +134,7 @@ have changed since yesterday.
 | `htmlx/` | A linear tokenizer rather than a tree. Everything glean wants from a page is either the anchors or the visible prose, and malformed markup degrades into slightly worse text instead of an error. |
 | `extract/` | A relevance score decides whether a page is a notice at all, which is what keeps the model from being handed several hundred partner biographies a day. Regular expressions read dates and amounts; the model reads the class definition. Every scan prints what it spent. |
 | `store/` | An append-only event log with state derived by replaying it. The most important thing this program can tell you is that a deadline moved, and a store that overwrites cannot tell you that. |
+| `dedupe/` | One proceeding reported by three sites is one row. Merging is conservative: a disagreement on a stated deadline or claim portal is treated as proof that two similar-sounding records are different cases. |
 | `match/` | The three-valued evaluation above. |
 | `notify/` | Thirty, fourteen, seven, three and one day out. The thirty-day one is the one that matters, because a claim needing a document you have to find is not something to learn about on the last morning. |
 
@@ -152,6 +153,19 @@ of the current registry this is the difference between one deadline and nine.
 
 See [docs/models.md](docs/models.md) for how the model is chosen and what it
 costs.
+
+### What a real scan looks like
+
+Against the current registry, with `google/gemini-3.7-flash`:
+
+```
+91 candidates, 91 fetched, 47 not relevant, 44 extracted, 44 new, 0 errors in 2m53s
+49 model call(s), 206474 in / 68966 out tokens, $0.2067
+```
+
+Forty-four records, forty-one distinct proceedings once duplicates are merged,
+for twenty-one cents. A second scan the next day re-reads none of the unchanged
+pages and costs almost nothing.
 
 ## Sources
 

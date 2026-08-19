@@ -99,7 +99,7 @@ func TestUnknownProfileGeneratesPricedQuestion(t *testing.T) {
 	if got := a.Probability; got < 0.74 || got > 0.76 {
 		t.Errorf("probability = %v, want ~0.75", got)
 	}
-	if got := a.Questions[0].Ask; got != "Did you buy No Frills between 2001-01-01 to 2021-12-31?" {
+	if got := a.Questions[0].Ask; got != "Did you buy No Frills between 2001-01-01 and 2021-12-31?" {
 		t.Errorf("question reads %q", got)
 	}
 }
@@ -189,6 +189,27 @@ func TestRankPrefersTheClaimThatClosesFirst(t *testing.T) {
 	}
 }
 
+func TestQuestionsReadAsEnglish(t *testing.T) {
+	// A half-open class period is the common case, and "between up to
+	// 2012-03-12" is what naive concatenation produces.
+	mk := func(w model.Window) string {
+		s := &model.Settlement{ID: "x", Stage: model.StageClaimsOpen,
+			Criteria: []model.Criterion{{Kind: model.KindMedical, Entity: "drug", Label: "Drug", Window: w}}}
+		return Assess(s, model.DefaultProfile()).Questions[0].Ask
+	}
+	cases := map[string]string{
+		mk(model.Window{}):                       "Were you prescribed or treated with Drug?",
+		mk(model.Window{Until: d("2012-03-12")}): "Were you prescribed or treated with Drug on or before 2012-03-12?",
+		mk(model.Window{From: d("2012-03-12")}):  "Were you prescribed or treated with Drug at any time since 2012-03-12?",
+		mk(win("2001-01-01", "2021-12-31")):      "Were you prescribed or treated with Drug between 2001-01-01 and 2021-12-31?",
+	}
+	for got, want := range cases {
+		if got != want {
+			t.Errorf("question reads %q, want %q", got, want)
+		}
+	}
+}
+
 func TestQuestionsMergeAcrossSettlements(t *testing.T) {
 	// One question about CIBC that unblocks two settlements should be asked once
 	// and priced at the sum of what it unlocks.
@@ -204,11 +225,24 @@ func TestQuestionsMergeAcrossSettlements(t *testing.T) {
 	if len(qs) != 1 {
 		t.Fatalf("want one merged question, got %d", len(qs))
 	}
-	if qs[0].Worth != 100 {
-		t.Errorf("merged worth = %v, want 100", qs[0].Worth)
+	// Worth is probability-weighted, not the headline payout. One unanswered
+	// criterion at the default prevalence of 0.3 puts these two settlements at
+	// $9 and $21. Pricing the question at the full $100 would rank a question
+	// about a rare drug class above one about a supermarket half the country
+	// shops at, and would let a summary line total ninety-six questions into
+	// half a million dollars nobody is owed.
+	if got := qs[0].Worth; got < 29.9 || got > 30.1 {
+		t.Errorf("merged worth = %v, want about 30", got)
 	}
 	if len(qs[0].Unlocks) != 2 {
 		t.Errorf("merged question unlocks %v", qs[0].Unlocks)
+	}
+
+	// The headline figure counts each settlement once, however many of its
+	// criteria are still open.
+	byID := map[string]*model.Settlement{"a": mk("a", 30), "b": mk("b", 70)}
+	if got := TotalAtStake(qs, byID, as); got < 29.9 || got > 30.1 {
+		t.Errorf("total at stake = %v, want about 30", got)
 	}
 }
 
@@ -240,5 +274,34 @@ func TestNoCriteriaIsUnknownNotEligible(t *testing.T) {
 	if a.ExpectedValue >= a.Payout {
 		t.Errorf("expected value %v should be discounted below the payout %v",
 			a.ExpectedValue, a.Payout)
+	}
+}
+
+func TestUnpricedSettlementsRankByProbability(t *testing.T) {
+	// Most notices state no per-claimant figure. Ranking every one of them
+	// equally would put a class you are almost certainly in level with one you
+	// are almost certainly not, which discards the only thing known about them.
+	mk := func(id string, prevalence float64) *model.Settlement {
+		return &model.Settlement{ID: id, Stage: model.StageClaimsOpen,
+			Criteria: []model.Criterion{{
+				Kind: model.KindService, Entity: id, Label: id, Prevalence: prevalence,
+			}}}
+	}
+	likely, unlikely := mk("likely", 0.9), mk("unlikely", 0.02)
+	byID := map[string]*model.Settlement{"likely": likely, "unlikely": unlikely}
+	p := model.DefaultProfile()
+
+	as := []Assessment{Assess(unlikely, p), Assess(likely, p)}
+	Rank(as, byID)
+	if as[0].SettlementID != "likely" {
+		t.Errorf("ranked %q first, want the one you probably qualify for", as[0].SettlementID)
+	}
+
+	// The proxy must not leak into anything the user reads as a dollar figure.
+	for _, a := range as {
+		if a.Payout != 0 || a.ExpectedValue != 0 {
+			t.Errorf("%s: unpriced settlement reported payout %v / value %v",
+				a.SettlementID, a.Payout, a.ExpectedValue)
+		}
 	}
 }

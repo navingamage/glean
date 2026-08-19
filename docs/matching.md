@@ -124,6 +124,19 @@ Expired and ruled-out settlements sort to the bottom rather than disappearing,
 because seeing why something was excluded is how you catch a wrong answer in your
 own profile.
 
+## Unpriced settlements
+
+Most notices state no per-claimant figure, so `EstimatePayout` returns zero for
+a good half of the store. Zero means unknown, and the list shows `?` rather than
+a number.
+
+For ranking only, an unpriced settlement is scored against a nominal small
+consumer payout multiplied by its probability. Giving them all one constant
+would sort a class you are almost certainly in level with one you are almost
+certainly not, discarding the only thing known about them. That proxy never
+reaches `Payout` or `ExpectedValue`: using a number to break a tie is a
+different thing from showing someone an invented figure.
+
 ## Questions
 
 An `unknown` criterion becomes a question with a stable id of `kind:entity`, so
@@ -131,6 +144,14 @@ answering it once retires it everywhere and forever. Questions are merged across
 settlements and worth the sum of what they unlock, which is why `glean ask` puts
 "did you hold an account with CIBC" ahead of a question about one obscure class:
 the first one settles three files.
+
+A question is worth the probability-weighted value of the settlement it blocks,
+not that settlement's headline payout. Pricing it at the payout would rank a
+question about a rare drug class, worth $17,500 to the handful of people in it,
+above a question about a supermarket half the country shops at. It would also
+let a summary line add ninety-six questions into half a million dollars nobody
+is owed, which is what the first version of this did. The total shown counts
+each settlement once however many of its criteria are open.
 
 Skipping is a real answer to "I do not remember", and is recorded as neither yes
 nor no. Recording a skip as a no would be a lie that costs money later.
