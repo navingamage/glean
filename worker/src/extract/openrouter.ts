@@ -11,7 +11,16 @@ import { OUTPUT_SCHEMA, SYSTEM_PROMPT } from "./schema";
 export const DEFAULT_CHEAP_MODEL = "google/gemini-2.5-flash-lite";
 export const DEFAULT_PRIME_MODEL = "google/gemini-3.7-flash";
 
-const BASE_URL = "https://openrouter.ai/api/v1";
+/**
+ * OpenRouter direct. Overridable so the same calls can be sent through a proxy
+ * that speaks the same protocol, which in practice means a Cloudflare AI
+ * Gateway: its OpenRouter endpoint passes the body and the Authorization header
+ * through untouched, so the model, the schema and the answer are the same and
+ * only the observability changes. Kept as configuration rather than a code
+ * change so that falling back to the direct URL when the proxy has a bad minute
+ * is one `wrangler secret`, with no deploy.
+ */
+export const DEFAULT_BASE_URL = "https://openrouter.ai/api/v1";
 
 /** Prime sends the whole notice; cheap sends less, because input dominates the bill. */
 const PRIME_MAX_CHARS = 60_000;
@@ -108,7 +117,14 @@ export class Extractor {
     readonly cheapModel: string,
     readonly primeModel: string,
     readonly usage: Usage = newUsage(),
+    /** Where the chat completions endpoint lives, with no trailing slash. */
+    readonly baseURL: string = DEFAULT_BASE_URL,
   ) {}
+
+  /** True when calls are going somewhere other than OpenRouter itself. */
+  proxied(): boolean {
+    return this.baseURL !== DEFAULT_BASE_URL;
+  }
 
   models(): string {
     return this.cheapModel === this.primeModel
@@ -161,7 +177,7 @@ export class Extractor {
       if (attempt > 0) {
         await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
       }
-      const resp = await fetch(`${BASE_URL}/chat/completions`, {
+      const resp = await fetch(`${this.baseURL}/chat/completions`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${this.key}`,

@@ -11,7 +11,9 @@ import {
   checkLogin, clearedCookie, credentials, isDefault, sessionCookie, signedIn,
 } from "./auth";
 import { Store } from "./db";
-import { Extractor, DEFAULT_CHEAP_MODEL, DEFAULT_PRIME_MODEL, usageString } from "./extract/openrouter";
+import {
+  DEFAULT_BASE_URL, DEFAULT_CHEAP_MODEL, DEFAULT_PRIME_MODEL, Extractor, newUsage, usageString,
+} from "./extract/openrouter";
 import { collapse } from "./dedupe";
 import { Assessment, assess, questions, rank, totalAtStake } from "./match";
 import { Claim, ClaimState, Holding, Profile, Settlement, validKind } from "./model";
@@ -35,6 +37,12 @@ export interface Env {
   GLEAN_USERNAME?: string;
   GLEAN_PASSWORD?: string;
   GLEAN_WEBHOOK?: string;
+  /**
+   * Where the model calls go. Unset means OpenRouter directly; set it to a
+   * Cloudflare AI Gateway's OpenRouter endpoint to get token counts, costs,
+   * retries and an optional cache without changing the request itself.
+   */
+  GLEAN_OPENROUTER_BASE?: string;
   GLEAN_MODEL_CHEAP?: string;
   GLEAN_MODEL_PRIME?: string;
   GLEAN_PER_SOURCE?: string;
@@ -64,6 +72,8 @@ function extractorFor(env: Env): Extractor | undefined {
     env.OPENROUTER_API_KEY,
     env.GLEAN_MODEL_CHEAP || DEFAULT_CHEAP_MODEL,
     env.GLEAN_MODEL_PRIME || DEFAULT_PRIME_MODEL,
+    newUsage(),
+    env.GLEAN_OPENROUTER_BASE || DEFAULT_BASE_URL,
   );
 }
 
@@ -242,7 +252,10 @@ async function scan(env: Env): Promise<void> {
 
   const res = await runScan(store, sources, extractor, opts);
   const line = `${summarize(res)}, ${Math.round((Date.now() - startedAt) / 1000)}s` +
-    (extractor ? `\n${usageString(extractor.usage, extractor.models())}` : "");
+    (extractor
+      ? `\n${usageString(extractor.usage, extractor.models())}` +
+        (extractor.proxied() ? " via gateway" : "")
+      : "");
   // Written before the digest, because the digest reads the whole store and is
   // the more likely of the two to be cut off. Losing the summary of a pass that
   // did real work is how the first deployment looked like it had done nothing.

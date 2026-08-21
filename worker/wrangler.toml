@@ -50,6 +50,13 @@ GLEAN_MAX_EXTRACTIONS = "3"
 
 # Secrets, set with `wrangler secret put <name>`, never written to this file:
 #   OPENROUTER_API_KEY   required for class definitions
+#   GLEAN_OPENROUTER_BASE  optional; where the model calls go. Unset means
+#                          OpenRouter directly. Set it to a Cloudflare AI
+#                          Gateway's OpenRouter endpoint,
+#                          https://gateway.ai.cloudflare.com/v1/<account>/<gateway>/openrouter,
+#                          for token counts, costs, retries and an optional
+#                          cache. The body and the Authorization header pass
+#                          through untouched, so the answer does not change.
 #   GLEAN_USERNAME       optional; the dashboard sign-in, "test" when unset
 #   GLEAN_PASSWORD       optional; the dashboard sign-in, "test" when unset
 #   GLEAN_WEBHOOK        optional; where the digest is posted

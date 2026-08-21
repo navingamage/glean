@@ -131,6 +131,39 @@ and a password generated rather than chosen:
 openssl rand -base64 24
 ```
 
+## Sending the model calls through a gateway
+
+`GLEAN_OPENROUTER_BASE` moves every extraction onto a Cloudflare AI Gateway
+without changing the request:
+
+```bash
+wrangler secret put GLEAN_OPENROUTER_BASE
+# https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>/openrouter
+```
+
+Unset, the calls go straight to OpenRouter. That is the point of it being
+configuration: the gateway sits in the request path, and if it has a bad minute
+the way back is one command and no deploy.
+
+The gateway's OpenRouter endpoint forwards the body and the `Authorization`
+header untouched, so the model, the schema and the answer are the same. What is
+gained is token counts and dollar cost per request, retries and model fallbacks
+as configuration, and an optional response cache. Caching is off until enabled,
+and its key is a hash of provider, endpoint, model, auth header and the whole
+request body, so changing a model or a prompt cannot serve a stale extraction.
+In production the cache is nearly worthless anyway, because `hashes` already
+stops a page whose text has not changed from being sent at all. It earns its
+place while developing the extractor against the same few dozen pages.
+
+Logs are on by default and store request and response bodies. That is public
+notice text and model output, and nothing from a profile is ever sent to a
+model, so there is nothing private in them. `cf-aig-collect-log-payload: false`
+keeps the counts without the bodies if that changes.
+
+Creating the gateway needs **AI Gateway: Edit** on the API token, which the
+current one does not have. The dashboard under AI > AI Gateway does it without
+touching the token.
+
 ## Where a person's own data sits
 
 Three tables in D1, each row tagged with the signed-in identity:
