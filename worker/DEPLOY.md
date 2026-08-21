@@ -173,6 +173,24 @@ notice text and model output, and nothing from a profile is ever sent to a
 model, so there is nothing private in them. `cf-aig-collect-log-payload: false`
 keeps the counts without the bodies if that changes.
 
+### Reading what it cost
+
+```bash
+source ~/.config/antipode/load-secrets.sh
+Scripts/costs          # the last 200 calls, by day and by model
+Scripts/costs 1000     # look further back
+```
+
+This reads the gateway's own log rather than glean's arithmetic. The scan writes
+a cost into its event log, but that number is glean adding up what OpenRouter
+told it, inside a pass the platform may cut short before it writes anything at
+all. The gateway counts on the far side of the request and keeps counting when
+the Worker dies, so the two disagreeing is a signal worth having.
+
+It wants **AI Gateway: Read** on the token, which is a different permission from
+the one the requests themselves use. A token can run through the gateway and
+still be unable to read its logs.
+
 ### What it costs in latency
 
 Nothing measurable. Measured from a Worker on the edge rather than from a

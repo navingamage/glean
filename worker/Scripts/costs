@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+#
+# What the model calls cost, read from the AI Gateway rather than from glean's
+# own arithmetic.
+#
+# The scan already writes a cost into its event log, but that number is glean
+# adding up what OpenRouter told it, in a process that may be cut short before it
+# writes anything at all. The gateway counts on the other side of the request and
+# keeps counting when the Worker dies, so the two disagreeing is a signal worth
+# having.
+#
+#   Scripts/costs           # the last 200 calls, by day and by model
+#   Scripts/costs 1000      # look further back
+#
+# Wants a Cloudflare API token with AI Gateway Read. See DEPLOY.md.
+set -euo pipefail
+
+GATEWAY="${GLEAN_GATEWAY_ID:-default}"
+ITEM="${GLEAN_GATEWAY_TOKEN_ITEM:-antipode-cloudflare-glean-token}"
+WANT="${1:-200}"
+
+: "${CLOUDFLARE_ACCOUNT_ID:?source ~/.config/antipode/load-secrets.sh first}"
+
+TOKEN=$(security find-generic-password -a "$USER" -s "$ITEM" -w 2>/dev/null) || {
+  echo "costs: no Keychain item '$ITEM'" >&2
+  echo "  add it with: security add-generic-password -U -a \"\$USER\" -s $ITEM -w" >&2
+  exit 1
+}
+
+API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/ai-gateway/gateways/$GATEWAY/logs"
+
+# The API caps a page at 50.
+PER=50
+page=1
+rows="[]"
+while [ "$(printf '%s' "$rows" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)))')" -lt "$WANT" ]; do
+  # Fed through a config file on stdin rather than as arguments, so the token is
+  # never visible in the process list to anyone else on the machine.
+  body=$(printf 'url = "%s?per_page=%s&page=%s&order_by=created_at&order_by_direction=desc"\nheader = "Authorization: Bearer %s"\nsilent\nshow-error\n' \
+    "$API" "$PER" "$page" "$TOKEN" | curl --config -)
+  rows=$(printf '%s\n%s' "$rows" "$body" | python3 -c '
+import sys, json
+have, resp = sys.stdin.read().split("\n", 1)
+d = json.loads(resp)
+if not d.get("success"):
+    sys.exit("costs: " + json.dumps(d.get("errors")))
+got = d.get("result") or []
+print(json.dumps(json.loads(have) + got))
+print(len(got), file=sys.stderr)
+' 2>/tmp/glean-costs-got)
+  [ "$(cat /tmp/glean-costs-got)" -lt "$PER" ] && break
+  page=$((page + 1))
+done
+rm -f /tmp/glean-costs-got
+
+printf '%s' "$rows" | python3 -c '
+import sys, json, collections
+
+rows = json.load(sys.stdin)
+if not rows:
+    sys.exit("no calls logged yet")
+
+by_day = collections.defaultdict(lambda: [0, 0.0, 0, 0, 0])   # calls, cost, in, out, cached
+by_model = collections.defaultdict(lambda: [0, 0.0])
+errors = 0
+for r in rows:
+    day = (r.get("created_at") or "")[:10]
+    cost = r.get("cost") or 0
+    d = by_day[day]
+    d[0] += 1; d[1] += cost
+    d[2] += r.get("tokens_in") or 0
+    d[3] += r.get("tokens_out") or 0
+    d[4] += 1 if r.get("cached") else 0
+    m = by_model[r.get("model") or "?"]
+    m[0] += 1; m[1] += cost
+    if not r.get("success", True):
+        errors += 1
+
+print(f"{len(rows)} calls logged, {errors} failed\n")
+print("day".ljust(12) + "calls".rjust(7) + "cached".rjust(8) +
+      "in".rjust(10) + "out".rjust(9) + "cost".rjust(11))
+for day in sorted(by_day, reverse=True):
+    c, cost, tin, tout, cached = by_day[day]
+    print(f"{day:<12}{c:>7}{cached:>8}{tin:>10}{tout:>9}{cost:>11.4f}")
+print()
+print("model".ljust(36) + "calls".rjust(7) + "cost".rjust(11))
+for m in sorted(by_model, key=lambda k: -by_model[k][1]):
+    c, cost = by_model[m]
+    print(f"{m:<36}{c:>7}{cost:>11.4f}")
+print(f"\ntotal ${sum(v[1] for v in by_model.values()):.4f}")
+'
