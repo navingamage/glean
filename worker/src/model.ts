@@ -183,11 +183,28 @@ export interface Holding {
   added_on: DateStr;
 }
 
+/**
+ * A subject the reader does not want to hear about again. Kept as written
+ * rather than as a compiled pattern so the preferences page can show back
+ * exactly what was typed, and so a term can be removed by the same string.
+ */
+export interface Mute {
+  term: string;
+  added_on: DateStr;
+}
+
 export interface Profile {
   name?: string;
   email?: string;
   residences: Residence[];
   holdings: Holding[];
+  /**
+   * Terms that hide a settlement outright. Optional because profiles written
+   * before this existed have none, and because the Go implementation does not
+   * write the field: a profile moved from there arrives without it rather than
+   * arriving broken.
+   */
+  mutes?: Mute[];
   min_payout: number;
   max_effort_minutes: number;
   updated_on: DateStr;
@@ -197,6 +214,7 @@ export function defaultProfile(): Profile {
   return {
     residences: [{ province: "CA", window: { ...EMPTY_WINDOW } }],
     holdings: [],
+    mutes: [],
     min_payout: 5,
     max_effort_minutes: 60,
     updated_on: today(),

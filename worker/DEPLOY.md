@@ -131,6 +131,25 @@ and a password generated rather than chosen:
 openssl rand -base64 24
 ```
 
+## Where a person's own data sits
+
+Three tables in D1, each row tagged with the signed-in identity:
+
+| table | holds |
+| --- | --- |
+| `profile` | answers, provinces, payout and effort thresholds, muted terms |
+| `claims` | interested, filed, paid, skipped, with the dates |
+| `events` | the audit trail: what was discovered, what moved, what was answered |
+
+The preferences page at `/preferences` is the front end for all of it, and
+`/export.json` hands the profile and the claims back as a file. Settlements are
+deliberately not in this list. They are public facts about proceedings, they cost
+money to extract, and scanning once for everybody is the whole efficiency
+argument.
+
+Nothing from a profile is ever sent to a model. The only thing an extraction
+call carries is the public settlement page.
+
 ## Access, and per-person profiles
 
 Settlements are shared; profiles and claims are not. A settlement is a public

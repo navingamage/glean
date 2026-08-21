@@ -167,6 +167,15 @@ It is live at [glean.antipodetech.com](https://glean.antipodetech.com) behind a
 sign-in form. The credentials are `test` / `test` until `GLEAN_USERNAME` and
 `GLEAN_PASSWORD` are set, so it can be opened by anyone it is shown to.
 
+The hosted version has a preferences page the CLI does not. It shows every
+answer on file with a way to take it back, the payout and effort thresholds, and
+a list of muted terms. A muted term hides a settlement from the queue and from
+the digest, matched on whole words against the title, the summary and the class
+definition. That last part is what makes it useful: the major junior hockey case
+decomposes into a criterion per league per province, so it generates more
+questions than anything else in the registry, and none of them say "hockey" in
+the title. One term retires the lot.
+
 The domain logic is duplicated across Go and TypeScript, which is a real cost
 and not an accident: Workers runs JavaScript and WASM, and Go's networking and
 filesystem do not survive that transition. The pure parts were ported with their
