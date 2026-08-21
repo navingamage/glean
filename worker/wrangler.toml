@@ -50,5 +50,9 @@ GLEAN_MAX_EXTRACTIONS = "3"
 
 # Secrets, set with `wrangler secret put <name>`, never written to this file:
 #   OPENROUTER_API_KEY   required for class definitions
-#   GLEAN_ACCESS_KEY     required; gates the dashboard
+#   GLEAN_USERNAME       optional; the dashboard sign-in, "test" when unset
+#   GLEAN_PASSWORD       optional; the dashboard sign-in, "test" when unset
 #   GLEAN_WEBHOOK        optional; where the digest is posted
+#
+# The sign-in defaults to test / test so a fresh deployment can be opened by
+# anyone it is shown to. Set both before the store holds a real profile.

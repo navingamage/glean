@@ -163,6 +163,10 @@ rather than a Pages project because Pages Functions cannot be scheduled, and a
 deployment that only ran when someone visited it would give away the entire
 premise.
 
+It is live at [glean.antipodetech.com](https://glean.antipodetech.com) behind a
+sign-in form. The credentials are `test` / `test` until `GLEAN_USERNAME` and
+`GLEAN_PASSWORD` are set, so it can be opened by anyone it is shown to.
+
 The domain logic is duplicated across Go and TypeScript, which is a real cost
 and not an accident: Workers runs JavaScript and WASM, and Go's networking and
 filesystem do not survive that transition. The pure parts were ported with their

@@ -7,7 +7,9 @@
  * give that back.
  */
 import { identify } from "./access";
-import { authorize } from "./auth";
+import {
+  checkLogin, clearedCookie, credentials, isDefault, sessionCookie, signedIn,
+} from "./auth";
 import { Store } from "./db";
 import { Extractor, DEFAULT_CHEAP_MODEL, DEFAULT_PRIME_MODEL, usageString } from "./extract/openrouter";
 import { collapse } from "./dedupe";
@@ -17,13 +19,20 @@ import { normalizeEntity, normalizeProvince, PROVINCES } from "./normalize";
 import { authorityMap, enabledSources, loadSources } from "./sources";
 import { defaultOptions, runScan, summarize } from "./scan";
 import {
-  deadlineClass, deadlineText, esc, layout, questionCard, valueWord, verdictWord,
+  deadlineClass, deadlineText, esc, layout, loginPage, questionCard, valueWord,
+  verdictWord,
 } from "./views";
 
 export interface Env {
   DB: D1Database;
   OPENROUTER_API_KEY?: string;
-  GLEAN_ACCESS_KEY?: string;
+  /**
+   * The dashboard sign-in. Both default to "test" when unset, which is what
+   * makes a fresh deployment openable; set them with `wrangler secret put`
+   * before the store holds a profile worth protecting.
+   */
+  GLEAN_USERNAME?: string;
+  GLEAN_PASSWORD?: string;
   GLEAN_WEBHOOK?: string;
   GLEAN_MODEL_CHEAP?: string;
   GLEAN_MODEL_PRIME?: string;
@@ -82,11 +91,47 @@ async function assessAll(store: Store, user: string) {
 
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const auth = authorize(req, env.GLEAN_ACCESS_KEY);
-    if (!auth.ok) return auth.response;
+    const url = new URL(req.url);
+    const creds = credentials(env);
+
+    if (url.pathname === "/login") {
+      if (req.method === "POST") {
+        const form = await req.clone().formData();
+        const next = String(form.get("next") ?? "/");
+        if (await checkLogin(req, creds)) {
+          return new Response(null, {
+            status: 303,
+            headers: {
+              Location: next.startsWith("/") && !next.startsWith("//") ? next : "/",
+              "Set-Cookie": await sessionCookie(creds),
+            },
+          });
+        }
+        return html(loginPage({ failed: true, hint: isDefault(creds), next }), 401);
+      }
+      if (await signedIn(req, creds)) return redirect("/");
+      return html(loginPage({ hint: isDefault(creds), next: url.searchParams.get("next") ?? "/" }));
+    }
+
+    if (req.method === "POST" && url.pathname === "/logout") {
+      return new Response(null, {
+        status: 303,
+        headers: { Location: "/login", "Set-Cookie": clearedCookie() },
+      });
+    }
+
+    if (!(await signedIn(req, creds))) {
+      // Sending an unauthenticated request to the form, carrying where it was
+      // going, so a bookmarked settlement page survives a signed-out visit.
+      const next = url.pathname + (url.search || "");
+      if (req.method !== "GET") return html(loginPage({ hint: isDefault(creds) }), 401);
+      return new Response(null, {
+        status: 303,
+        headers: { Location: `/login?next=${encodeURIComponent(next)}` },
+      });
+    }
 
     const store = new Store(env.DB);
-    const url = new URL(req.url);
     const user = await identify(req, env.GLEAN_ACCESS_TEAM, env.GLEAN_ACCESS_AUD);
 
     try {
@@ -251,11 +296,13 @@ ${claimsRows ? `<h2>Your claims</h2><table><tr><th>Settlement</th><th>State</th>
 <h2>Everything tracked</h2>
 ${rows ? `<table><tr><th>You</th><th>Value</th><th>Deadline</th><th>Stage</th><th>Settlement</th></tr>${rows}</table>`
     : `<p class="sub">Nothing yet. A scan runs every morning; start one now if you would rather not wait.</p>`}
-<form method="post" action="/scan" style="margin-top:1.5rem">
-  <button>Scan now</button>
+<div style="margin-top:1.5rem">
+  <form class="inline" method="post" action="/scan"><button>Scan now</button></form>
+  <form class="inline" method="post" action="/logout" style="margin-left:.4rem">
+    <button>Sign out</button></form>
   <span class="sub" style="margin-left:.6rem">
-    Reads every source. Costs cents on a cold store and almost nothing after that.</span>
-</form>`;
+    Scanning reads every source. Costs cents on a cold store and almost nothing after that.</span>
+</div>`;
 
   const who = user === "owner" ? "" : ` &middot; ${esc(user)}`;
   return html(layout("Dashboard", body, `glean &middot; ${as.length} proceedings tracked${who}`));
@@ -381,8 +428,9 @@ function redirect(to: string): Response {
   return new Response(null, { status: 303, headers: { Location: safe } });
 }
 
-function html(body: string): Response {
+function html(body: string, status = 200): Response {
   return new Response(body, {
+    status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",

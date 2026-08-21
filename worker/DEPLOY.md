@@ -16,28 +16,37 @@ The `workers.dev` URL is deliberately disabled so there is one door.
 
 ## Signing in
 
-**Once per device, not once per visit.** The key is exchanged for a cookie that
-lasts a year, so after the first time you just open the URL.
+A username and a password on a form at `/login`. Out of the box they are:
 
-```bash
-Scripts/signin          # opens the browser on this Mac, already signed in
-Scripts/signin qr       # writes a QR to the Desktop; scan it with a phone, once
-Scripts/signin copy     # puts the sign-in URL on the clipboard
+```
+test / test
 ```
 
-The key lives in the Keychain and none of these print it. The QR is rendered
-locally, so the key never leaves the machine and no service sees it; delete the
-file afterwards. `signin qr` wants `segno` (`pip install segno`) and says so if
-it is missing, in which case `signin copy` needs nothing.
+Which is deliberate: the deployment is meant to be openable by anyone it is
+shown to, without a key being carried between devices first. Signing in sets a
+cookie that lasts a year, so it is once per device rather than once per visit,
+and **Sign out** on the dashboard clears it.
 
-Doing it by hand, if you would rather:
+To change them, set both as secrets and redeploy:
 
 ```bash
-open "https://glean.antipodetech.com/?k=$(security find-generic-password -a "$USER" -s antipode-glean-access-key -w)"
+wrangler secret put GLEAN_USERNAME
+wrangler secret put GLEAN_PASSWORD
 ```
 
-Enabling Cloudflare Access retires all of this: you get an email code on any
-device and there is no key to carry.
+The cookie is not the password. It is an HMAC of the username under the
+password, so a stolen cookie cannot be read back into the credential that minted
+it, and changing the password signs every device out at once. It is HttpOnly,
+Secure and SameSite=Lax, every page is served `no-store` and `noindex, nofollow`,
+and a wrong guess says only that the pair did not match, never which half was
+wrong.
+
+Do change them before the store holds a profile worth protecting. The profile
+behind the dashboard is a list of every bank, shop, insurer and employer you have
+answered a question about, and `test / test` is not a gate, it is a formality.
+
+Enabling Cloudflare Access retires the form entirely: you get an email code on
+any device and there is nothing to remember.
 
 ## What you have to do first
 
@@ -83,13 +92,14 @@ cd worker
 source ~/.config/antipode/load-secrets.sh
 
 npm install
-npm test                     # 31 tests, no network, no account needed
+npm test                     # 48 tests, no network, no account needed
 
 wrangler d1 create glean     # copy the database_id into wrangler.toml
 npm run db:remote            # apply schema.sql
 
-wrangler secret put GLEAN_ACCESS_KEY     # see below
 wrangler secret put OPENROUTER_API_KEY   # the same key the CLI uses
+wrangler secret put GLEAN_USERNAME       # optional, "test" when unset
+wrangler secret put GLEAN_PASSWORD       # optional, "test" when unset
 wrangler secret put GLEAN_WEBHOOK        # optional, for phone notifications
 
 wrangler deploy
@@ -105,26 +115,21 @@ routes = [{ pattern = "glean.antipodetech.com", custom_domain = true }]
 and deploy again. Cloudflare creates the DNS record and the certificate; expect a
 few minutes and some 522s while that provisions.
 
-## The access key
+## What the sign-in is protecting
 
-**Generate a long random one and do not reuse a password:**
+The profile behind the dashboard is a list of every bank, shop, insurer and
+employer you have answered a question about. It should not be one guessed URL
+away from anyone, which is why the Worker serves nothing at all to a request
+without a session, redirecting it to `/login` and carrying where it was going so
+a bookmarked settlement page survives a signed-out visit.
+
+The default `test / test` is a demo credential, not a gate. A deployment holding
+anything real wants `GLEAN_USERNAME` and `GLEAN_PASSWORD` set to something else,
+and a password generated rather than chosen:
 
 ```bash
-openssl rand -base64 32
+openssl rand -base64 24
 ```
-
-The dashboard is gated by that single shared key, because there is exactly one
-user. The Worker refuses to serve anything when the key is unset: a deployment
-that forgot the secret should be visibly broken, never quietly public.
-
-Sign in once per device by visiting `https://glean.antipodetech.com/?k=THE_KEY`.
-The Worker sets an HttpOnly, Secure, SameSite=Lax cookie for a year and redirects
-to the bare path, so the key does not linger in history, in a bookmark or in a
-Referer header. Every page is served `no-store` and `noindex, nofollow`.
-
-This matters more here than on a normal site. The profile behind the dashboard is
-a list of every bank, shop, insurer and employer you have answered a question
-about. It should not be one guessed URL away from anyone.
 
 ## Access, and per-person profiles
 
@@ -142,7 +147,7 @@ GLEAN_ACCESS_AUD  = "the application audience tag"
 ```
 
 Until those are set, every signed-in request is a single `owner` identity, which
-is the right answer when the shared key is the only gate.
+is the right answer when the login form is the only gate.
 
 The `Cf-Access-Authenticated-User-Email` header is never trusted. Access sets it,
 but so can anyone reaching the Worker without going through Access, and trusting
@@ -153,7 +158,7 @@ the forgeries, including `alg: none` and a token signed with the wrong key.
 
 At the time of deployment the Cloudflare API reported Access as **not enabled**
 on this account (`access.api.error.not_enabled` from two separate endpoints), so
-the shared key is doing the work. That is worth confirming in the Zero Trust
+the login form is doing the work. That is worth confirming in the Zero Trust
 dashboard before relying on per-person profiles.
 
 ## Scheduling, and why it runs so often
@@ -193,8 +198,8 @@ frequent invocations cost requests rather than money.
 Trigger a pass by hand from the dashboard's **Scan now** button, or:
 
 ```bash
-curl -X POST -H "Cookie: glean_session=$(security find-generic-password -a "$USER" -s antipode-glean-access-key -w)" \
-  https://glean.antipodetech.com/scan
+curl -c jar -X POST -d 'username=test&password=test' https://glean.antipodetech.com/login
+curl -b jar -X POST https://glean.antipodetech.com/scan
 ```
 
 Locally: `wrangler dev --test-scheduled`, then `curl localhost:8788/__scheduled`.
@@ -211,7 +216,7 @@ text has not changed is never sent to a model. See `../docs/models.md`.
 ## Local development
 
 ```bash
-cp .dev.vars.example .dev.vars    # gitignored; put a throwaway access key in it
+cp .dev.vars.example .dev.vars    # gitignored; or skip it and sign in as test / test
 npm run db:local
 npx wrangler dev --local --test-scheduled
 ```

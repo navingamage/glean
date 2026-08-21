@@ -47,6 +47,14 @@ button.primary{background:var(--accent);color:var(--bg);border-color:var(--accen
 .q{background:var(--panel);border:1px solid var(--line);border-radius:10px;
   padding:.8rem 1rem;margin-bottom:.5rem;display:flex;justify-content:space-between;
   align-items:center;gap:1rem;flex-wrap:wrap}
+label{display:block;font-size:.8rem;color:var(--muted);margin:0 0 .2rem}
+input[type=text],input[type=password]{font:inherit;width:100%;padding:.45rem .6rem;
+  background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px}
+input:focus{outline:none;border-color:var(--accent)}
+.login{max-width:20rem;margin:4rem auto 0}
+.login .field{margin-bottom:.8rem}
+.login button{width:100%;padding:.45rem}
+.bad{color:var(--bad);font-size:.86rem;margin:0 0 .8rem}
 table{width:100%;border-collapse:collapse;font-size:.9rem}
 td,th{text-align:left;padding:.4rem .6rem;border-bottom:1px solid var(--line)}
 th{color:var(--muted);font-weight:600;font-size:.78rem;text-transform:uppercase;letter-spacing:.06em}
@@ -118,4 +126,31 @@ export function questionCard(q: Question, back = ""): string {
   return `<div class="q"><div>${esc(q.ask)}
     <div class="meta"><span>${esc(worthWord(q))}</span></div></div>
     <div>${form("yes", "primary", "Yes")} ${form("no", "", "No")}</div></div>`;
+}
+
+/**
+ * The sign-in page.
+ *
+ * Deliberately says nothing about which half of a wrong guess was wrong, and
+ * says the default credentials out loud only while they are still the
+ * defaults, so a demo is openable without a hint sitting on a real deployment.
+ */
+export function loginPage(opts: { failed?: boolean; hint?: boolean; next?: string } = {}): string {
+  const next = opts.next && opts.next.startsWith("/") && !opts.next.startsWith("//")
+    ? opts.next : "/";
+  const body = `<form class="login" method="post" action="/login">
+  <h1>glean</h1>
+  <p class="sub">Sign in to see what you can claim.</p>
+  ${opts.failed ? `<p class="bad">That username and password did not match.</p>` : ""}
+  <input type="hidden" name="next" value="${esc(next)}">
+  <div class="field"><label for="username">Username</label>
+    <input id="username" name="username" type="text" autocomplete="username"
+      autocapitalize="none" autocorrect="off" spellcheck="false" required autofocus></div>
+  <div class="field"><label for="password">Password</label>
+    <input id="password" name="password" type="password"
+      autocomplete="current-password" required></div>
+  <button class="primary">Sign in</button>
+  ${opts.hint ? `<p class="sub" style="margin:.9rem 0 0;text-align:center">test / test</p>` : ""}
+</form>`;
+  return layout("Sign in", body, "glean");
 }
