@@ -138,8 +138,21 @@ without changing the request:
 
 ```bash
 wrangler secret put GLEAN_OPENROUTER_BASE
-# https://gateway.ai.cloudflare.com/v1/<account_id>/<gateway_id>/openrouter
+# https://gateway.ai.cloudflare.com/v1/<account_id>/default/openrouter
+wrangler secret put GLEAN_AI_GATEWAY_TOKEN
+# a Cloudflare API token with AI Gateway access
 ```
+
+Two secrets because two things are being authenticated. The gateway checks the
+caller with `cf-aig-authorization`, then forwards to OpenRouter using the
+ordinary `Authorization` header, which still carries the OpenRouter key. Neither
+substitutes for the other.
+
+There is nothing to create first. The gateway named `default` comes into
+existence on the first authenticated request, which is what the dashboard means
+by "a default gateway will automatically be created". Sending only the OpenRouter
+key returns `AiGatewayError 2009 Unauthorized`, and naming a gateway that does
+not exist returns `2001 Please configure AI Gateway in the Cloudflare dashboard`.
 
 Unset, the calls go straight to OpenRouter. That is the point of it being
 configuration: the gateway sits in the request path, and if it has a bad minute
@@ -160,9 +173,24 @@ notice text and model output, and nothing from a profile is ever sent to a
 model, so there is nothing private in them. `cf-aig-collect-log-payload: false`
 keeps the counts without the bodies if that changes.
 
-Creating the gateway needs **AI Gateway: Edit** on the API token, which the
-current one does not have. The dashboard under AI > AI Gateway does it without
-touching the token.
+### What it costs in latency
+
+Nothing measurable. Measured from a Worker on the edge rather than from a
+laptop, because a laptop would be paying for a hop into Cloudflare that the real
+Worker never makes. Ten paired calls, alternating so a slow minute at the
+provider lands on both paths, `cf-aig-skip-cache: true` so the cache is not what
+is being timed, and an 18,000 character body to match what the cheap tier
+actually sends:
+
+```
+direct    median 475ms   mean 612   min 386   max 1285
+gateway   median 474ms   mean 538   min 383   max  987
+```
+
+One millisecond apart at the median. Individual pairs swing by up to 800ms in
+both directions, which is the provider's own variance rather than the proxy's,
+and is why the median is the number worth quoting. Against a prime extraction
+that takes five to twenty seconds this is not a consideration at all.
 
 ## Where a person's own data sits
 

@@ -119,6 +119,13 @@ export class Extractor {
     readonly usage: Usage = newUsage(),
     /** Where the chat completions endpoint lives, with no trailing slash. */
     readonly baseURL: string = DEFAULT_BASE_URL,
+    /**
+     * A Cloudflare API token, sent as `cf-aig-authorization` when the base URL
+     * is an AI Gateway. It authenticates the request to the gateway and is
+     * separate from the OpenRouter key, which still authenticates to the model
+     * provider on the far side. Empty when calling OpenRouter directly.
+     */
+    private gatewayToken: string = "",
   ) {}
 
   /** True when calls are going somewhere other than OpenRouter itself. */
@@ -184,6 +191,9 @@ export class Extractor {
           "Content-Type": "application/json",
           "HTTP-Referer": "https://github.com/navingamage/glean",
           "X-Title": "glean",
+          ...(this.gatewayToken
+            ? { "cf-aig-authorization": `Bearer ${this.gatewayToken}` }
+            : {}),
         },
         body,
       });

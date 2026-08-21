@@ -43,6 +43,14 @@ export interface Env {
    * retries and an optional cache without changing the request itself.
    */
   GLEAN_OPENROUTER_BASE?: string;
+  /**
+   * A Cloudflare API token with AI Gateway access, sent as
+   * `cf-aig-authorization`. Required when GLEAN_OPENROUTER_BASE points at a
+   * gateway, and unused otherwise. It is not the OpenRouter key: the gateway
+   * authenticates the caller, then forwards to the provider using the key in
+   * the ordinary Authorization header.
+   */
+  GLEAN_AI_GATEWAY_TOKEN?: string;
   GLEAN_MODEL_CHEAP?: string;
   GLEAN_MODEL_PRIME?: string;
   GLEAN_PER_SOURCE?: string;
@@ -74,6 +82,7 @@ function extractorFor(env: Env): Extractor | undefined {
     env.GLEAN_MODEL_PRIME || DEFAULT_PRIME_MODEL,
     newUsage(),
     env.GLEAN_OPENROUTER_BASE || DEFAULT_BASE_URL,
+    env.GLEAN_AI_GATEWAY_TOKEN || "",
   );
 }
 
