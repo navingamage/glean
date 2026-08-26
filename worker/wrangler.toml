@@ -28,6 +28,27 @@ routes = [{ pattern = "glean.antipodetech.com", custom_domain = true }]
 [triggers]
 crons = ["*/10 * * * *"]
 
+# Why three quarters of scheduled runs die, recorded here so it is not
+# rediscovered.
+#
+# The scan is cut off with `exceededCpu` after ten milliseconds of CPU. Ten is
+# the Workers free plan ceiling and this account is on the free plan, so
+# `[limits] cpu_ms` cannot be raised: wrangler refuses the deploy outright with
+# "CPU limits are not supported for the Free plan".
+#
+# A pass needs far more than ten milliseconds. Measured over five days its CPU
+# runs from fifty milliseconds to 783, because it parses up to forty documents
+# with an HTML parser written in TypeScript, and parsing is the expensive part.
+# Wall clock is not the problem: a pass spends twenty seconds mostly waiting on
+# other people's servers, which costs no CPU at all.
+#
+# So the pass records `scan-started`, works until the platform stops it, and
+# never writes its summary. Six starts an hour, one or two finishes.
+#
+# The budget the scan enforces is wall clock, and the limit that kills it is
+# CPU. Those are different clocks and the Worker cannot read the one that
+# matters, so it has no way to stop just short.
+
 # Logs, so a pass that misbehaves can be read rather than guessed at.
 [observability]
 enabled = true
@@ -41,12 +62,25 @@ database_id = "ec3d1782-56e6-4e35-8348-f3bf388df7d6"
 # Both tiers, overridable without a code change. See docs/models.md.
 GLEAN_MODEL_CHEAP = "google/gemini-2.5-flash-lite"
 GLEAN_MODEL_PRIME = "google/gemini-3.7-flash"
-# Candidate pages followed per source per scan.
-GLEAN_PER_SOURCE = "40"
-# Kept under the platform subrequest cap (50 free, 1000 paid). Raise on paid.
-GLEAN_REQUEST_BUDGET = "40"
-GLEAN_DEADLINE_MS = "20000"
-GLEAN_MAX_EXTRACTIONS = "3"
+# Sized for ten milliseconds of CPU, which is what the free plan allows and
+# what the comment above [observability] explains.
+#
+# These were forty, forty and three, and a pass that big is killed partway
+# through and records nothing: six starts an hour and one finish. Small passes
+# that complete beat large ones that do not, because a pass cut off has still
+# spent the requests and thrown away what it learned. The scan already resumes
+# where it stopped, so throughput comes from the cron firing 144 times a day
+# rather than from any one pass being large.
+#
+# Raise these together with `[limits] cpu_ms` if this ever moves to a paid plan.
+GLEAN_PER_SOURCE = "3"
+# Also under the platform subrequest cap, which is 50 on free.
+GLEAN_REQUEST_BUDGET = "4"
+# Wall clock, and not the thing that kills a pass. Lowered so a pass that is
+# going to be stopped is stopped by its own budget first, where it can write
+# down what it did.
+GLEAN_DEADLINE_MS = "5000"
+GLEAN_MAX_EXTRACTIONS = "1"
 
 # Secrets, set with `wrangler secret put <name>`, never written to this file:
 #   OPENROUTER_API_KEY   required for class definitions
