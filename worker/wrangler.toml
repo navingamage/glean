@@ -53,10 +53,13 @@ crons = ["*/10 * * * *"]
 [observability]
 enabled = true
 
+# The database this was deployed against was deleted in September 2026 along
+# with the rest of the hosting, so this id is a placeholder. `wrangler d1 create
+# glean` prints a new one, and `npm run db:remote` applies schema.sql to it.
 [[d1_databases]]
 binding = "DB"
 database_name = "glean"
-database_id = "ec3d1782-56e6-4e35-8348-f3bf388df7d6"
+database_id = "REPLACE_WITH_A_NEW_DATABASE_ID"
 
 [vars]
 # Both tiers, overridable without a code change. See docs/models.md.

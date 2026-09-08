@@ -11,8 +11,20 @@ that difference is deliberate.
 
 ## Status
 
-Live at **https://glean.antipodetech.com**, gated, scanning every ten minutes.
-The `workers.dev` URL is deliberately disabled so there is one door.
+**Not deployed.** It ran at glean.antipodetech.com from August 2026 until
+September 2026, gated, scanning every ten minutes. The Worker, the D1 database,
+the hostname and the AI Gateway were all deleted, so nothing of it is left on
+Cloudflare and nothing of it is being billed.
+
+The store was exported before the database was dropped: settlements, the
+profile, the claims and the full event log, as one JSON file. Everything below
+still describes how to put it back, and the schema has not changed, so a new
+database restores that file without a translation step.
+
+Deploying again means walking the whole of "What you have to do first" once
+more. The custom domain has to be re-attached, which recreates the DNS record,
+and every secret has to be set again, because deleting a Worker deletes its
+secrets with it.
 
 ## Signing in
 

@@ -163,9 +163,12 @@ rather than a Pages project because Pages Functions cannot be scheduled, and a
 deployment that only ran when someone visited it would give away the entire
 premise.
 
-It is live at [glean.antipodetech.com](https://glean.antipodetech.com) behind a
-sign-in form. The credentials are `test` / `test` until `GLEAN_USERNAME` and
-`GLEAN_PASSWORD` are set, so it can be opened by anyone it is shown to.
+It ran at glean.antipodetech.com for a few weeks and is not hosted any more. The
+code is complete and the deployment steps are in
+[worker/DEPLOY.md](worker/DEPLOY.md), so it goes back up with one `wrangler
+deploy` against a fresh D1 database. It came down because a scan every ten
+minutes costs real money at the model and the CLI does the same work on demand,
+not because anything about it was unfinished.
 
 The hosted version has a preferences page the CLI does not. It shows every
 answer on file with a way to take it back, the payout and effort thresholds, and
